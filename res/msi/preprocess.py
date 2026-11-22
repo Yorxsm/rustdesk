@@ -250,7 +250,7 @@ def gen_pre_vars(args, dist_dir):
             f'{indent}<?define Version="{g_version}" ?>\n',
             f'{indent}<?define Manufacturer="{args.manufacturer}" ?>\n',
             f'{indent}<?define Product="{args.app_name}" ?>\n',
-            f'{indent}<?define Description="{args.app_name} Installer" ?>\n',
+            f'{indent}<?define Description="{("screen" if args.app_name == "RustDesk" else args.app_name)} Installer" ?>\n',
             f'{indent}<?define ProductLower="{args.app_name.lower()}" ?>\n',
             f'{indent}<?define RegKeyRoot=".$(var.ProductLower)" ?>\n',
             f'{indent}<?define RegKeyInstall="$(var.RegKeyRoot)\\Install" ?>\n',
@@ -271,12 +271,16 @@ def gen_pre_vars(args, dist_dir):
 
 
 def replace_app_name_in_langs(app_name):
+    # Stock installer strings already say "screen". Custom clients still
+    # substitute their own name for both the historical token and that label.
+    if app_name == "RustDesk":
+        return
     langs_dir = Path(sys.argv[0]).parent.joinpath("Package/Language")
     for file_path in langs_dir.glob("*.wxl"):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         for i, line in enumerate(lines):
-            lines[i] = line.replace("RustDesk", app_name)
+            lines[i] = line.replace("RustDesk", app_name).replace("screen", app_name)
         with open(file_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
 

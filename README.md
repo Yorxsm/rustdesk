@@ -1,5 +1,6 @@
 <p align="center">
   <img src="res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
+  <a href="#how-it-works">How it works</a> •
   <a href="#raw-steps-to-build">Build</a> •
   <a href="#how-to-build-with-docker">Docker</a> •
   <a href="#file-structure">Structure</a> •
@@ -18,6 +19,29 @@ Chat with us: [Discord](https://discord.gg/nDceKgxnkV) | [Twitter](https://twitt
 [![RustDesk Server Pro](https://img.shields.io/badge/RustDesk%20Server%20Pro-Advanced%20Features-blue)](https://rustdesk.com/pricing.html)
 
 Yet another remote desktop solution, written in Rust. Works out of the box with no configuration required. You have full control of your data, with no concerns about security. You can use our rendezvous/relay server, [set up your own](https://rustdesk.com/server), or [write your own rendezvous/relay server](https://github.com/rustdesk/rustdesk-server-demo).
+
+## How it works
+
+This app is **screen**. It lets one person help another person use their computer. Both people can see what is happening. Nothing is hidden.
+
+There are two roles:
+
+- The **host** is the person who will do the work.
+- The **staff** member is the person at the computer that will be helped.
+
+The staff member does not read an ID or a password out loud. The host sends a link. The staff member still has to click **Accept** before the host can use their computer.
+
+1. The host opens screen and clicks **Copy invite link**.
+2. The host sends that link to the staff member, for example in chat or email.
+3. The staff member clicks the link. screen opens on their computer.
+4. A message tells them they will need to click **Accept**. screen also switches that computer to click-to-accept, so there is no password to share.
+5. The host's screen app asks to connect. On the staff member's computer, the normal prompt appears: someone wants to control this computer, with **Accept** and **Cancel**.
+6. The staff member clicks **Accept**. Only then can the host see and use the computer.
+7. If the staff member clicks **Cancel**, or closes the prompt, the host does not get control.
+
+The staff member must approve every session. The link does not accept for them, and it does not turn on unattended access.
+
+The link looks like `rustdesk://help/<host-id>?invite=<code>`. The `rustdesk://` part is what opens the screen app. The code works once, for about 15 minutes, and only while the host's app is still open.
 
 ![image](https://user-images.githubusercontent.com/71636191/171661982-430285f0-2e12-4b1d-9957-4a58e375304d.png)
 

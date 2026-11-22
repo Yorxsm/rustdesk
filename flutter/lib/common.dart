@@ -2252,6 +2252,31 @@ setEnvTerminalAdmin() {
   bind.mainSetEnv(key: 'IS_TERMINAL_ADMIN', value: 'Y');
 }
 
+Future<void> beginHelpInvite(String hostId, String token) async {
+  await gFFI.serverModel.setApproveMode('click');
+  final context = globalKey.currentContext;
+  if (context != null) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(translate('Share screen')),
+        content: Text(translate(
+            'Click Accept on the next prompt. This computer stays under your control until you do.')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(translate('Close')),
+          ),
+        ],
+      ),
+    );
+  }
+  final started = await bind.mainSendHelpInvite(hostId: hostId, token: token);
+  if (!started) {
+    showToast(translate('Failed'));
+  }
+}
+
 // uri link handler
 bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   List<String>? args;
@@ -2286,6 +2311,8 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   String? password;
   String? switchUuid;
   bool? forceRelay;
+  String? helpHostId;
+  String? helpToken;
   var loginMethod = '';
   for (int i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -2333,6 +2360,14 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
       case '--request-approval':
         loginMethod = 'request-approval';
         break;
+      case '--help-invite':
+        helpHostId = args[i + 1];
+        i++;
+        break;
+      case '--invite-token':
+        helpToken = args[i + 1];
+        i++;
+        break;
       case '--switch_uuid':
         switchUuid = args[i + 1];
         i++;
@@ -2346,6 +2381,14 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   }
   if (loginMethod == 'request-approval') {
     password = null;
+  }
+  if (helpHostId != null && helpToken != null) {
+    final hostId = helpHostId;
+    final token = helpToken;
+    Future.delayed(const Duration(milliseconds: 400), () {
+      beginHelpInvite(hostId!, token!);
+    });
+    return true;
   }
   if (type != null && id != null) {
     switch (type) {
@@ -2466,6 +2509,18 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
         });
       }
     }
+  } else if (uri.authority == 'help' && uri.path.length > 1) {
+    final id = uri.path.substring(1);
+    final token = uri.queryParameters.entries
+        .firstWhere(
+          (entry) => entry.key.toLowerCase() == 'invite',
+          orElse: () => const MapEntry('', ''),
+        )
+        .value;
+    if (id.isEmpty || token.isEmpty) {
+      return null;
+    }
+    return ['--help-invite', id, '--invite-token', token];
   } else if (options.contains(uri.authority)) {
     command = '--${uri.authority}';
     if (uri.path.length > 1) {
@@ -3061,7 +3116,7 @@ int versionCmp(String v1, String v2) {
 }
 
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  final name = displayName;
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
@@ -4230,6 +4285,17 @@ String get appName {
     _appName = bind.mainGetAppNameSync();
   }
   return _appName;
+}
+
+/// Name shown in window titles and other chrome.
+/// [appName] stays the internal id used for install paths, printer names,
+/// and translation keys.
+String get displayName {
+  final name = appName;
+  if (name == 'RustDesk') {
+    return 'screen';
+  }
+  return name;
 }
 
 String getConnectionText(bool secure, bool direct, String streamType) {

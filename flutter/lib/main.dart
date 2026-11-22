@@ -496,8 +496,8 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           navigatorKey: globalKey,
           debugShowCheckedModeBanner: false,
           title: isWeb
-              ? '${bind.mainGetAppNameSync()} Web Client V2 (Preview)'
-              : bind.mainGetAppNameSync(),
+              ? '$displayName Web Client V2 (Preview)'
+              : displayName,
           theme: MyTheme.lightTheme,
           darkTheme: MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
@@ -563,6 +563,28 @@ _registerEventHandler() {
     });
     platformFFI.registerEventHandler('language', 'language', (_) async {
       reloadAllWindows();
+    });
+  }
+  if ((isDesktop && desktopType == DesktopType.main) || isMobile) {
+    platformFFI.registerEventHandler('on_staff_ready', 'help-invite',
+        (evt) async {
+      final id = evt['id']?.toString() ?? '';
+      if (id.isEmpty) return;
+      if (isDesktop) {
+        await rustDeskWinManager.newRemoteDesktop(id,
+            loginMethod: 'request-approval');
+      } else {
+        final context = Get.context;
+        if (context != null) {
+          await connect(context, id, loginMethod: 'request-approval');
+        }
+      }
+    });
+    platformFFI.registerEventHandler(
+        'on_help_invite_result', 'help-invite-result', (evt) async {
+      if (evt['ok']?.toString() != 'true') {
+        showToast(translate('Failed'));
+      }
     });
   }
   if (isAndroid) {

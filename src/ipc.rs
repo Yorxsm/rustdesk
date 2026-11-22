@@ -417,6 +417,8 @@ pub enum Data {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     SwitchSidesBack,
     UrlLink(String),
+    HelpInviteIssue(String),
+    HelpInviteReady(String),
     VoiceCallIncoming,
     StartVoiceCall,
     VoiceCallResponse(bool),
@@ -1340,6 +1342,9 @@ async fn handle(data: Data, stream: &mut Connection) {
                 // Port forward session count is only a get value.
             }
         },
+        Data::HelpInviteIssue(token) => {
+            crate::help_invite::store_invite(&token);
+        }
         Data::ControlPermissionsRemoteModify(_) => {
             use hbb_common::rendezvous_proto::control_permissions::Permission;
             let state =
@@ -1626,7 +1631,7 @@ pub async fn start_pa() {
                             let mut buf: Vec<u8> = vec![0; AUDIO_DATA_SIZE_U8];
                             match psimple::Simple::new(
                                 None,                             // Use the default server
-                                &crate::get_app_name(),           // Our application’s name
+                                &crate::get_display_name(),       // Our application’s name
                                 pulse::stream::Direction::Record, // We want a record stream
                                 Some(&device),                    // Use the default device
                                 "record",                         // Description of our stream
