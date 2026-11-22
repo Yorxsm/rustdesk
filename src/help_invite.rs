@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use hbb_common::log;
+use hbb_common::{log, tokio};
 
 /// Name prefix on a login that only asks the host to connect back.
 /// It is not a control session.
@@ -137,7 +137,7 @@ pub fn issue_token_blocking() -> String {
     }
 }
 
-#[hbb_common::tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "current_thread")]
 async fn send_issue_to_server(token: &str) -> bool {
     if crate::is_server() {
         return store_invite(token);
@@ -170,7 +170,7 @@ pub fn spawn_send(host_id: String, token: String) -> bool {
     true
 }
 
-#[hbb_common::tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "current_thread")]
 async fn send_invite_blocking(host_id: String, token: String) -> hbb_common::ResultType<()> {
     use crate::client::{handle_login_error, Client, Interface};
     use base::message_proto::*;
