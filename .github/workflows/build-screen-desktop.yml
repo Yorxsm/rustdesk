@@ -65,6 +65,7 @@ jobs:
         with:
           toolchain: "1.75"
           targets: ${{ matrix.job.target }}
+          components: rustfmt
 
       - name: Install flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -84,6 +85,9 @@ jobs:
             bash .github/patches/apply_flutter_3.44_source_patches.sh
           fi
           pushd flutter && flutter pub get && popd
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt --toolchain 1.75-x86_64-unknown-linux-gnu
 
       - name: Run flutter rust bridge
         run: |
@@ -160,6 +164,10 @@ jobs:
         with:
           toolchain: "1.75"
           targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt --toolchain 1.75-x86_64-pc-windows-msvc
 
       - name: Setup vcpkg with Github Actions binary cache
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -320,6 +328,10 @@ jobs:
         with:
           toolchain: "1.81"
           targets: ${{ matrix.target }}
+          components: rustfmt
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt --toolchain 1.81-${{ matrix.target }}
 
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
