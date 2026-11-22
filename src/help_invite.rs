@@ -3,6 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use async_trait::async_trait;
 use hbb_common::log;
 
 /// Name prefix on a login that only asks the host to connect back.
@@ -259,6 +260,7 @@ struct InviteClient {
     lc: std::sync::Arc<std::sync::RwLock<crate::client::LoginConfigHandler>>,
 }
 
+#[async_trait]
 impl crate::client::Interface for InviteClient {
     fn send(&self, _data: crate::client::Data) {}
 
