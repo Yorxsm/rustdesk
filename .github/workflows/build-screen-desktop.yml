@@ -204,7 +204,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          tar -acf "dist/rustdesk-${VERSION}-x86_64.zip" -C rustdesk .
+          tar -acf "dist/screen-${VERSION}-windows-x86_64.zip" -C rustdesk .
 
       - name: Upload Windows zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -221,7 +221,7 @@ jobs:
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
-          mv ./target/release/rustdesk-portable-packer.exe "dist/rustdesk-${VERSION}-x86_64.exe"
+          mv ./target/release/rustdesk-portable-packer.exe "dist/screen-${VERSION}-x86_64.exe"
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -234,7 +234,7 @@ jobs:
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
-          mv $msi.FullName "../../dist/rustdesk-${{ env.VERSION }}-x86_64.msi"
+          mv $msi.FullName "../../dist/screen-${{ env.VERSION }}-x86_64.msi"
           popd
 
       - name: Upload Windows installers
@@ -281,7 +281,7 @@ jobs:
 
       - name: Install build runtime
         run: |
-          brew install llvm create-dmg
+          brew install llvm
           if ! command -v pkg-config &>/dev/null; then
             brew install pkg-config
           fi
@@ -363,12 +363,30 @@ jobs:
           fi
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.extra }}
 
-      - name: Zip macOS app
+      - name: Sign app and zip it
+        shell: bash
         run: |
+          set -euo pipefail
+          SRC_APP="./flutter/build/macos/Build/Products/Release/RustDesk.app"
+          test -d "$SRC_APP"
+          STAGE="${RUNNER_TEMP}/screen-dmg-stage"
+          APP="${STAGE}/RustDesk.app"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          ditto "$SRC_APP" "$APP"
+          xattr -cr "$APP"
+          # --deep skips some nested bundles on current macOS, so sign those first.
+          while IFS= read -r -d '' lib; do
+            codesign --force --sign - "$lib"
+          done < <(find "$APP" -type f \( -name '*.dylib' -o -name '*.so' \) -print0)
+          while IFS= read -r -d '' bundle; do
+            codesign --force --sign - "$bundle"
+          done < <(find "$APP" -depth -type d \( -name '*.framework' -o -name '*.xpc' -o -name '*.app' \) ! -path "$APP" -print0)
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose=2 "$APP"
           mkdir -p dist
-          APP="./flutter/build/macos/Build/Products/Release/RustDesk.app"
-          test -d "$APP"
-          ditto -c -k --keepParent "$APP" "dist/rustdesk-${VERSION}-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/screen-${VERSION}-${{ matrix.arch }}.zip"
+          ln -s /Applications "${STAGE}/Applications"
 
       - name: Upload macOS zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -377,14 +395,38 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-      - name: Create dmg
+      - name: Create and verify dmg
+        shell: bash
         run: |
-          APP="./flutter/build/macos/Build/Products/Release/RustDesk.app"
-          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
-          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" \
-            --window-size 800 400 --app-drop-link 600 185 \
-            "dist/rustdesk-${VERSION}-${{ matrix.arch }}.dmg" "$APP"
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/screen-dmg-stage"
+          test -d "${STAGE}/RustDesk.app"
+          test -L "${STAGE}/Applications"
+          KB=$(du -sk "$STAGE" | awk '{print $1}')
+          MB=$(( KB / 1024 + KB / 1024 / 5 + 64 ))
+          DMG="dist/screen-${VERSION}-${{ matrix.arch }}.dmg"
+          hdiutil create \
+            -volname screen \
+            -srcfolder "$STAGE" \
+            -fs HFS+ \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            -size "${MB}m" \
+            -ov \
+            "$DMG"
+          hdiutil verify "$DMG"
+          MNT="${RUNNER_TEMP}/screen-dmg-mount"
+          rm -rf "$MNT"
+          mkdir -p "$MNT"
+          cleanup() {
+            hdiutil detach "$MNT" >/dev/null 2>&1 || hdiutil detach -force "$MNT" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
+          test -d "$MNT/RustDesk.app/Contents/MacOS"
+          test -L "$MNT/Applications"
+          hdiutil detach "$MNT"
+          trap - EXIT
 
       - name: Upload macOS dmg
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
