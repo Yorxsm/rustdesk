@@ -1236,6 +1236,20 @@ pub fn get_app_name() -> String {
     hbb_common::config::APP_NAME.read().unwrap().clone()
 }
 
+/// Product name shown in the UI. [`get_app_name`] stays the internal id
+/// used for paths, the service, the URI scheme, and bundle filenames.
+pub const DISPLAY_NAME: &str = "screen";
+
+#[inline]
+pub fn get_display_name() -> String {
+    let name = get_app_name();
+    if name == "RustDesk" {
+        DISPLAY_NAME.to_owned()
+    } else {
+        name
+    }
+}
+
 #[inline]
 pub fn is_rustdesk() -> bool {
     hbb_common::config::APP_NAME.read().unwrap().eq("RustDesk")

@@ -271,12 +271,24 @@ pub fn translate_locale(name: String, locale: &str) -> String {
         if let Some(value) = placeholder_value.as_ref() {
             s = s.replace("{}", &value);
         }
-        if !crate::is_rustdesk() {
-            if s.contains("RustDesk")
-                && !name.starts_with("upgrade_rustdesk_server_pro")
-                && name != "powered_by_me"
-            {
-                let app_name = crate::get_app_name();
+        // Stock builds show DISPLAY_NAME. Custom clients still substitute their
+        // own app name. Server-product strings and the upstream "Powered by"
+        // line for custom clients keep the RustDesk token.
+        let display_name = if name == "powered_by_me" {
+            if crate::is_rustdesk() {
+                Some(crate::DISPLAY_NAME.to_owned())
+            } else {
+                None
+            }
+        } else if name.starts_with("upgrade_rustdesk_server_pro")
+            || name == "server-oss-not-support-tip"
+        {
+            None
+        } else {
+            Some(crate::get_display_name())
+        };
+        if let Some(app_name) = display_name {
+            if s.contains("RustDesk") && app_name != "RustDesk" {
                 if !app_name.contains("RustDesk") {
                     s = s.replace("RustDesk", &app_name);
                 } else {

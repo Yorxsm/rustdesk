@@ -3061,7 +3061,7 @@ int versionCmp(String v1, String v2) {
 }
 
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  final name = displayName;
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
@@ -4230,6 +4230,17 @@ String get appName {
     _appName = bind.mainGetAppNameSync();
   }
   return _appName;
+}
+
+/// Name shown in window titles and other chrome.
+/// [appName] stays the internal id used for install paths, printer names,
+/// and translation keys.
+String get displayName {
+  final name = appName;
+  if (name == 'RustDesk') {
+    return 'screen';
+  }
+  return name;
 }
 
 String getConnectionText(bool secure, bool direct, String streamType) {
