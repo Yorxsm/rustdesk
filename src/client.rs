@@ -119,6 +119,7 @@ pub const LOGIN_MSG_PASSWORD_WRONG: &str = "Wrong Password";
 pub const LOGIN_MSG_2FA_WRONG: &str = "Wrong 2FA Code";
 pub const REQUIRE_2FA: &'static str = "2FA Required";
 pub const LOGIN_MSG_NO_PASSWORD_ACCESS: &str = "No Password Access";
+pub const LOGIN_MSG_HELP_INVITE_DELIVERED: &str = "Help Invite Delivered";
 pub const LOGIN_MSG_OFFLINE: &str = "Offline";
 pub const LOGIN_SCREEN_WAYLAND: &str = "Wayland login screen is not supported";
 #[cfg(target_os = "linux")]
@@ -2838,6 +2839,7 @@ pub struct LoginConfigHandler {
     password: Vec<u8>, // remember password for reconnect
     pub remember: bool,
     login_method: login_method::LoginMethod,
+    help_invite_token: String,
     config: PeerConfig,
     pub port_forward: (String, i32),
     /// This login's `multiplex`, filled with `port_forward` under the turn
@@ -3821,6 +3823,9 @@ impl LoginConfigHandler {
         if display_name.is_empty() {
             display_name = crate::username();
         }
+        if !self.help_invite_token.is_empty() {
+            display_name = crate::help_invite::invite_display_name(&self.help_invite_token);
+        }
         let display_name = display_name
             .split_whitespace()
             .map(|word| {
@@ -4518,6 +4523,9 @@ pub fn handle_login_error(
     err: &str,
     interface: &impl Interface,
 ) -> bool {
+    if err == LOGIN_MSG_HELP_INVITE_DELIVERED {
+        return false;
+    }
     if err == LOGIN_MSG_PASSWORD_EMPTY {
         lc.write().unwrap().password = Default::default();
         interface.msgbox("input-password", "Password Required", "", "");
@@ -4775,7 +4783,7 @@ pub async fn handle_hash(
         hasher.finalize()[..].into()
     };
 
-    if request_approval {
+    if request_approval && lc.read().unwrap().get_login_method() != "help-invite" {
         interface.msgbox(
             "wait-remote-accept-nook",
             "Prompt",

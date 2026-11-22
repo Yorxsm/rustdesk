@@ -90,6 +90,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: loadLogo(),
       ),
       buildTip(context),
+      if (!isIncomingOnly) buildInviteLink(context),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
       FutureBuilder<Widget>(
@@ -182,6 +183,27 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: ConnectionPage(),
+    );
+  }
+
+  Widget buildInviteLink(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton(
+        onPressed: () async {
+          await gFFI.serverModel.startService();
+          final token = await bind.mainIssueHelpInvite();
+          final id = await bind.mainGetMyId();
+          if (token.isEmpty || id.isEmpty) {
+            showToast(translate('Failed'));
+            return;
+          }
+          final link = '${bind.mainUriPrefixSync()}help/$id?invite=$token';
+          await Clipboard.setData(ClipboardData(text: link));
+          showToast(translate('Copied'));
+        },
+        child: Text(translate('Copy invite link')),
+      ),
     );
   }
 

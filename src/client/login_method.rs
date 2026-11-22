@@ -5,12 +5,22 @@ pub(super) enum LoginMethod {
     #[default]
     Automatic,
     RequestApproval,
+    HelpInvite,
 }
 
 impl LoginConfigHandler {
     pub(crate) fn set_login_method(&mut self, method: &str) -> bool {
+        self.help_invite_token.clear();
         self.login_method = match method {
             "request-approval" => LoginMethod::RequestApproval,
+            method if method.starts_with("help-invite:") => {
+                let token = &method["help-invite:".len()..];
+                if !crate::help_invite::valid_token(token) {
+                    return false;
+                }
+                self.help_invite_token = token.to_owned();
+                LoginMethod::HelpInvite
+            }
             _ => return false,
         };
         true
@@ -24,6 +34,7 @@ impl LoginConfigHandler {
         match self.login_method {
             LoginMethod::Automatic => "",
             LoginMethod::RequestApproval => "request-approval",
+            LoginMethod::HelpInvite => "help-invite",
         }
     }
 }

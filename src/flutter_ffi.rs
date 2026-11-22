@@ -1148,6 +1148,14 @@ pub fn main_get_app_name() -> String {
     get_app_name()
 }
 
+pub fn main_issue_help_invite() -> String {
+    crate::help_invite::issue_token_blocking()
+}
+
+pub fn main_send_help_invite(host_id: String, token: String) -> bool {
+    crate::help_invite::spawn_send(host_id, token)
+}
+
 pub fn main_get_app_name_sync() -> SyncReturn<String> {
     SyncReturn(get_app_name())
 }

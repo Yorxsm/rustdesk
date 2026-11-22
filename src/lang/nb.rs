@@ -827,5 +827,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Request approval", "Be om godkjenning"),
         ("Forever", "For alltid"),
         ("username-login-disabled-oidc-unavailable", "Innlogging med brukernavn og passord er deaktivert, og ingen OIDC-innloggingsmetoder er tilgjengelige."),
+    
+        ("Copy invite link", ""),
+        ("Click Accept on the next prompt. This computer stays under your control until you do.", ""),
     ].iter().cloned().collect();
 }

@@ -827,5 +827,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Request approval", "Solicitar aprovação"),
         ("Forever", "Para sempre"),
         ("username-login-disabled-oidc-unavailable", "O início de sessão com nome de utilizador e palavra-passe está desativado e não existem métodos de início de sessão OIDC disponíveis."),
+    
+        ("Copy invite link", ""),
+        ("Click Accept on the next prompt. This computer stays under your control until you do.", ""),
     ].iter().cloned().collect();
 }

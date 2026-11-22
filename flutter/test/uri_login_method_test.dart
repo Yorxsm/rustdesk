@@ -34,6 +34,20 @@ void main() {
     }
   });
 
+  test('help invite links ask the host to connect back', () {
+    expect(
+      urlLinkToCmdArgs(Uri.parse(
+          'rustdesk://help/123456789?invite=11111111-1111-1111-1111-111111111111')),
+      [
+        '--help-invite',
+        '123456789',
+        '--invite-token',
+        '11111111-1111-1111-1111-111111111111',
+      ],
+    );
+    expect(urlLinkToCmdArgs(Uri.parse('rustdesk://help/123456789')), null);
+  });
+
   test('request-approval ignores an explicit password in either order', () {
     for (final query in [
       'password=provided&request-approval=true',

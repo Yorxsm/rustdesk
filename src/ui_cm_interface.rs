@@ -712,6 +712,13 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                         }
                                     }
                                 }
+                                Data::HelpInviteReady(staff_id) => {
+                                    #[cfg(feature = "flutter")]
+                                    crate::help_invite::push_staff_ready(&staff_id);
+                                    #[cfg(not(feature = "flutter"))]
+                                    let _ = staff_id;
+                                    break;
+                                }
                                 _ => {
 
                                 }
@@ -960,6 +967,12 @@ pub async fn start_listen<T: InvokeUiCM>(
             }
             Some(Data::CloseVoiceCall(reason)) => {
                 cm.voice_call_closed(current_id, reason.as_str());
+            }
+            Some(Data::HelpInviteReady(staff_id)) => {
+                #[cfg(feature = "flutter")]
+                crate::help_invite::push_staff_ready(&staff_id);
+                #[cfg(not(feature = "flutter"))]
+                let _ = staff_id;
             }
             None => {
                 break;

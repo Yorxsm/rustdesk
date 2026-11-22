@@ -1038,6 +1038,15 @@ class RustdeskImpl {
     return Future(() => js.context.callMethod('getByName', ['my_id']));
   }
 
+  Future<String> mainIssueHelpInvite({dynamic hint}) {
+    throw UnimplementedError("mainIssueHelpInvite");
+  }
+
+  Future<bool> mainSendHelpInvite(
+      {required String hostId, required String token, dynamic hint}) {
+    throw UnimplementedError("mainSendHelpInvite");
+  }
+
   Future<String> mainGetUuid({dynamic hint}) {
     return Future(() => js.context.callMethod('getByName', ['uuid']));
   }

@@ -417,6 +417,8 @@ pub enum Data {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     SwitchSidesBack,
     UrlLink(String),
+    HelpInviteIssue(String),
+    HelpInviteReady(String),
     VoiceCallIncoming,
     StartVoiceCall,
     VoiceCallResponse(bool),
@@ -1340,6 +1342,9 @@ async fn handle(data: Data, stream: &mut Connection) {
                 // Port forward session count is only a get value.
             }
         },
+        Data::HelpInviteIssue(token) => {
+            crate::help_invite::store_invite(&token);
+        }
         Data::ControlPermissionsRemoteModify(_) => {
             use hbb_common::rendezvous_proto::control_permissions::Permission;
             let state =

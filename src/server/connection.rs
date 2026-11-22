@@ -2940,6 +2940,21 @@ impl Connection {
         }
         // After handling CloseReason messages, proceed to process other message types
         if let Some(message::Union::LoginRequest(lr)) = msg.union {
+            // A help invite only asks this computer to connect back. It must
+            // close before the Accept dialog, and it never authorizes control.
+            match crate::help_invite::incoming(&lr.my_name, &lr.my_id) {
+                crate::help_invite::Incoming::Callback(staff_id) => {
+                    self.send_login_error(crate::client::LOGIN_MSG_HELP_INVITE_DELIVERED)
+                        .await;
+                    crate::help_invite::notify_host(staff_id);
+                    return false;
+                }
+                crate::help_invite::Incoming::Rejected => {
+                    self.send_login_error("Failed").await;
+                    return false;
+                }
+                crate::help_invite::Incoming::NotInvite => {}
+            }
             if !self.check_login_scope(&lr).await {
                 return false;
             }

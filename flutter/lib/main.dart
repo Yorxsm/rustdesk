@@ -565,6 +565,28 @@ _registerEventHandler() {
       reloadAllWindows();
     });
   }
+  if ((isDesktop && desktopType == DesktopType.main) || isMobile) {
+    platformFFI.registerEventHandler('on_staff_ready', 'help-invite',
+        (evt) async {
+      final id = evt['id']?.toString() ?? '';
+      if (id.isEmpty) return;
+      if (isDesktop) {
+        await rustDeskWinManager.newRemoteDesktop(id,
+            loginMethod: 'request-approval');
+      } else {
+        final context = Get.context;
+        if (context != null) {
+          await connect(context, id, loginMethod: 'request-approval');
+        }
+      }
+    });
+    platformFFI.registerEventHandler(
+        'on_help_invite_result', 'help-invite-result', (evt) async {
+      if (evt['ok']?.toString() != 'true') {
+        showToast(translate('Failed'));
+      }
+    });
+  }
   if (isAndroid) {
     platformFFI.registerEventHandler(
         'android_needs_deploy', 'android_needs_deploy', (_) async {
