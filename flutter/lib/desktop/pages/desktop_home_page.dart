@@ -191,16 +191,27 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       alignment: Alignment.centerLeft,
       child: TextButton(
         onPressed: () async {
-          await gFFI.serverModel.startService();
-          final token = await bind.mainIssueHelpInvite();
-          final id = await bind.mainGetMyId();
-          if (token.isEmpty || id.isEmpty) {
-            showToast(translate('Failed'));
-            return;
+          try {
+            await gFFI.serverModel.startService();
+            final result = await bind.mainIssueHelpInvite();
+            if (result.isEmpty || result.startsWith('error: ')) {
+              final detail =
+                  result.startsWith('error: ') ? result.substring(7) : '';
+              showToast(detail.isEmpty
+                  ? 'Could not create the invite link.'
+                  : 'Could not create the invite link. $detail');
+              return;
+            }
+            try {
+              await Clipboard.setData(ClipboardData(text: result));
+            } catch (error) {
+              showToast('Could not copy the invite link. $error\n$result');
+              return;
+            }
+            showToast(translate('Copied'));
+          } catch (error) {
+            showToast('Could not copy the invite link. $error');
           }
-          final link = '${bind.mainUriPrefixSync()}help/$id?invite=$token';
-          await Clipboard.setData(ClipboardData(text: link));
-          showToast(translate('Copied'));
         },
         child: Text(translate('Copy invite link')),
       ),

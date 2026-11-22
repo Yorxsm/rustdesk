@@ -1149,7 +1149,45 @@ pub fn main_get_app_name() -> String {
 }
 
 pub fn main_issue_help_invite() -> String {
-    crate::help_invite::issue_token_blocking()
+    let id = get_id();
+    if id.is_empty() {
+        return "error: This computer does not have an ID yet".to_owned();
+    }
+    match crate::help_invite::issue_token_blocking() {
+        Ok(token) => {
+            let link = format!("{}help/{id}?invite={token}", crate::get_uri_prefix());
+            if let Err(err) = copy_invite_link(&link) {
+                log::warn!("Invite link was not placed on the clipboard: {err}");
+            }
+            link
+        }
+        Err(err) => {
+            log::warn!("Could not create an invite link: {err}");
+            format!("error: {err}")
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn copy_invite_link(link: &str) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|err| err.to_string())?;
+    clipboard.set_text(link).map_err(|err| err.to_string())?;
+    // X11 forgets the selection when this value is dropped. macOS and Windows
+    // have already copied it into the system clipboard.
+    #[cfg(target_os = "linux")]
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(45));
+        drop(clipboard);
+    });
+    #[cfg(not(target_os = "linux"))]
+    drop(clipboard);
+    Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn copy_invite_link(link: &str) -> Result<(), String> {
+    let _ = link;
+    Ok(())
 }
 
 pub fn main_send_help_invite(host_id: String, token: String) -> bool {

@@ -1343,7 +1343,12 @@ async fn handle(data: Data, stream: &mut Connection) {
             }
         },
         Data::HelpInviteIssue(token) => {
-            crate::help_invite::store_invite(&token);
+            let ack = if crate::help_invite::store_invite(&token) {
+                token
+            } else {
+                String::new()
+            };
+            allow_err!(stream.send(&Data::HelpInviteIssue(ack)).await);
         }
         Data::ControlPermissionsRemoteModify(_) => {
             use hbb_common::rendezvous_proto::control_permissions::Permission;

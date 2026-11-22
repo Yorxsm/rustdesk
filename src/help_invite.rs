@@ -128,33 +128,59 @@ pub fn push_result(ok: bool, message: &str) {
     }
 }
 
-pub fn issue_token_blocking() -> String {
+pub fn issue_token_blocking() -> Result<String, String> {
     let token = uuid::Uuid::new_v4().to_string();
-    if send_issue_to_server(&token) {
-        token
-    } else {
-        String::new()
+    // The window that shows Copy is not started with --server, but on desktop it
+    // is usually the process that accepts the later login. Store the token here
+    // so a failed IPC call to ourselves does not throw the link away.
+    if crate::is_server() || crate::common::is_server_running() {
+        return if store_invite(&token) {
+            Ok(token)
+        } else {
+            Err("The invite token was rejected".to_owned())
+        };
+    }
+    let token_for_server = token.clone();
+    let sent = std::thread::spawn(move || send_issue_to_server(&token_for_server)).join();
+    match sent {
+        Ok(Ok(())) => Ok(token),
+        Ok(Err(err)) => Err(err),
+        Err(_) => Err("The invite service stopped".to_owned()),
     }
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn send_issue_to_server(token: &str) -> bool {
-    if crate::is_server() {
-        return store_invite(token);
-    }
+async fn send_issue_to_server(token: &str) -> Result<(), String> {
+    let mut last_error = "The background service is not running".to_owned();
     for _ in 0..8 {
-        if let Ok(mut conn) = crate::ipc::connect(300, "").await {
-            if conn
-                .send(&crate::ipc::Data::HelpInviteIssue(token.to_owned()))
-                .await
-                .is_ok()
-            {
-                return true;
+        match crate::ipc::connect(300, "").await {
+            Ok(mut conn) => {
+                if let Err(err) = conn
+                    .send(&crate::ipc::Data::HelpInviteIssue(token.to_owned()))
+                    .await
+                {
+                    last_error = err.to_string();
+                } else {
+                    match conn.next_timeout(1000).await {
+                        Ok(Some(crate::ipc::Data::HelpInviteIssue(ack))) if ack == token => {
+                            return Ok(());
+                        }
+                        Ok(Some(crate::ipc::Data::HelpInviteIssue(_))) => {
+                            return Err("The background service rejected the invite".to_owned());
+                        }
+                        Ok(_) => {
+                            last_error =
+                                "The background service did not accept the invite".to_owned();
+                        }
+                        Err(err) => last_error = err.to_string(),
+                    }
+                }
             }
+            Err(err) => last_error = err.to_string(),
         }
         hbb_common::sleep(0.2).await;
     }
-    false
+    Err(last_error)
 }
 
 pub fn spawn_send(host_id: String, token: String) -> bool {
@@ -313,6 +339,28 @@ impl crate::client::Interface for InviteClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue_token_is_stored_while_this_process_hosts_the_server() {
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                crate::common::set_server_running(self.0);
+            }
+        }
+        let _restore = Restore(crate::common::is_server_running());
+        crate::common::set_server_running(true);
+        let token = issue_token_blocking().expect("invite token");
+        let staff_id = "123456789";
+        match incoming(&invite_display_name(&token), staff_id) {
+            Incoming::Callback(id) => assert_eq!(id, staff_id),
+            other => panic!("expected callback, got a different invite result: {other:?}"),
+        }
+        assert!(matches!(
+            incoming(&invite_display_name(&token), staff_id),
+            Incoming::Rejected
+        ));
+    }
 
     #[test]
     fn invite_token_works_once_and_rejects_a_second_use() {
