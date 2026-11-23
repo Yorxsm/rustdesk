@@ -365,12 +365,28 @@ jobs:
             find "${VCPKG_ROOT}/" -name "*.log" -print -exec cat {} \;
             exit 1
           fi
+          # ffmpeg is a host port, so an Intel runner installs it for x64-osx.
+          # The arm64 compile looks in installed/arm64-osx/include.
+          if [ "$VCPKG_TRIPLET" = "arm64-osx" ]; then
+            if ! (cd /tmp && "$VCPKG_ROOT/vcpkg" install "ffmpeg:arm64-osx" \
+              --overlay-ports "$GITHUB_WORKSPACE/res/vcpkg" \
+              --overlay-triplets "$GITHUB_WORKSPACE/res/vcpkg-triplets" \
+              --x-install-root "$VCPKG_ROOT/installed"); then
+              find "${VCPKG_ROOT}/" -name "*.log" -print -exec cat {} \;
+              exit 1
+            fi
+          fi
 
       - name: Build rustdesk
         env:
           MAC_CARGO_TARGET: ${{ matrix.cargo_target }}
           MAC_BUILD_ARCH: ${{ matrix.mac_arch }}
+          VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
         run: |
+          if [ -n "$MAC_CARGO_TARGET" ]; then
+            export PKG_CONFIG_ALLOW_CROSS=1
+            export PKG_CONFIG_PATH="$VCPKG_ROOT/installed/${VCPKG_TRIPLET}/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          fi
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             MIN_MACOS_VERSION="12.3"
             sed -i -e "s/MACOSX_DEPLOYMENT_TARGET\=[0-9]*.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
