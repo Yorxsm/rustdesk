@@ -261,8 +261,8 @@ jobs:
             bridge: bridge-artifact
             extra: ""
           - arch: aarch64
-            # macos-26 arm queued for 15 minutes and was cancelled with no runner.
-            os: macos-15
+            # macos-26 and macos-15 arm were cancelled with no runner (hosted arm64 capacity).
+            os: macos-14
             target: aarch64-apple-darwin
             flutter: "3.44.9"
             bridge: bridge-artifact-flutter-3.44
