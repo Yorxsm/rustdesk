@@ -12,6 +12,7 @@ h1 { margin: 36px 0 12px; font-size: 17px; font-weight: 600; }
 p { margin: 0 0 16px; }
 a.btn { display: block; margin: 0 0 8px; padding: 12px 14px; background: #000; color: #fff; text-align: center; text-decoration: none; border-radius: 4px; }
 a.btn:hover { background: #333; }
+#open a.btn { padding: 14px 16px; }
 .alt { font-size: 14px; }
 .alt a { color: inherit; }
 @media (prefers-color-scheme: dark) {
@@ -24,12 +25,15 @@ a.btn:hover { background: #333; }
 <body>
 <main>
 <p class="mark">screen</p>
+<p class="alt"><a href="#open">Already have screen? Skip to step 2</a></p>
 <h1>1. Install</h1>
 <div id="primary"></div>
+<p class="alt" id="hint"></p>
 <p class="alt" id="others"></p>
 <p>These builds are unsigned. On Windows, choose More info, then Run anyway. On a Mac, right-click the app and choose Open.</p>
 <h1>2. Open</h1>
 <div id="open"></div>
+<p class="alt" id="open-note"></p>
 <h1>3. Allow help</h1>
 <p>When screen asks, click Accept to let them help you. Nobody can see or control your screen until you click Accept.</p>
 </main>
@@ -37,10 +41,9 @@ a.btn:hover { background: #333; }
 (function () {
   var files = {
     win: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-windows-x64.msi", "Download for Windows"],
-    arm: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-mac-apple-silicon.dmg", "Download for Mac"],
-    intel: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-mac-intel.dmg", "Download for Mac"]
+    arm: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-mac-apple-silicon.dmg", "Download for Mac (Apple Silicon — M1, M2, M3, M4)"],
+    intel: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-mac-intel.dmg", "Download for Mac (Intel)"]
   };
-  var labels = { win: "Windows", arm: "Mac Apple Silicon", intel: "Mac Intel" };
 
   function button(parent, href, text) {
     var a = document.createElement("a");
@@ -76,23 +79,34 @@ a.btn:hover { background: #333; }
     return "mac";
   }
 
+  function link(parent, href, text) {
+    var a = document.createElement("a");
+    a.href = href;
+    a.textContent = text;
+    parent.appendChild(a);
+  }
+
   function draw(kind) {
     var primary = document.getElementById("primary");
+    var hint = document.getElementById("hint");
     var others = document.getElementById("others");
     var keys = ["win", "arm", "intel"];
-    var mainKeys = kind === "win" || kind === "arm" || kind === "intel" ? [kind] : kind === "mac" ? ["arm", "intel"] : keys;
+    var confident = kind === "win" || kind === "arm" || kind === "intel";
+    var mainKeys = confident ? [kind] : kind === "mac" ? ["arm", "intel"] : keys;
     var i;
     for (i = 0; i < mainKeys.length; i++) button(primary, files[mainKeys[i]][0], files[mainKeys[i]][1]);
+    if (kind === "arm" || kind === "intel") {
+      var other = kind === "arm" ? "intel" : "arm";
+      hint.appendChild(document.createTextNode("Not sure which Mac? Apple menu > About This Mac: \"Chip: Apple M…\" = Apple Silicon, \"Processor: Intel\" = Intel. "));
+      link(hint, files[other][0], files[other][1]);
+    }
     var spare = [];
-    for (i = 0; i < keys.length; i++) if (mainKeys.indexOf(keys[i]) < 0) spare.push(keys[i]);
+    for (i = 0; i < keys.length; i++) if (mainKeys.indexOf(keys[i]) < 0 && keys[i] !== (kind === "arm" ? "intel" : kind === "intel" ? "arm" : "")) spare.push(keys[i]);
     if (!spare.length) return;
     others.appendChild(document.createTextNode("Other versions: "));
     for (i = 0; i < spare.length; i++) {
       if (i) others.appendChild(document.createTextNode(", "));
-      var a = document.createElement("a");
-      a.href = files[spare[i]][0];
-      a.textContent = labels[spare[i]];
-      others.appendChild(a);
+      link(others, files[spare[i]][0], files[spare[i]][1]);
     }
   }
 
@@ -109,6 +123,13 @@ a.btn:hover { background: #333; }
     a.className = "btn";
     a.href = "rustdesk://help/" + id + "?invite=" + encodeURIComponent(invite);
     a.textContent = "Open screen";
+    a.addEventListener("click", function () {
+      window.setTimeout(function () {
+        if (document.visibilityState === "visible" && document.hasFocus()) {
+          document.getElementById("open-note").textContent = "Didn't open? Install screen first (step 1), then click Open screen again.";
+        }
+      }, 2000);
+    });
     slot.appendChild(a);
   }
 
