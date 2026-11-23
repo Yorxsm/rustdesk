@@ -260,13 +260,20 @@ jobs:
             flutter: "3.24.5"
             bridge: bridge-artifact
             extra: ""
+            vcpkg_triplet: ""
+            cargo_target: ""
+            mac_arch: ""
           - arch: aarch64
-            # macos-26 and macos-15 arm were cancelled with no runner (hosted arm64 capacity).
-            os: macos-14
+            # Hosted arm64 images never started: macos-14 is unsupported, and
+            # macos-15/macos-26 were cancelled with no runner. Cross-build here.
+            os: macos-26-intel
             target: aarch64-apple-darwin
             flutter: "3.44.9"
             bridge: bridge-artifact-flutter-3.44
             extra: "--screencapturekit"
+            vcpkg_triplet: arm64-osx
+            cargo_target: aarch64-apple-darwin
+            mac_arch: arm64
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -347,13 +354,22 @@ jobs:
           doNotCache: false
 
       - name: Install vcpkg dependencies
+        env:
+          VCPKG_TRIPLET: ${{ matrix.vcpkg_triplet }}
         run: |
-          if ! $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"; then
+          triplet_args=()
+          if [ -n "$VCPKG_TRIPLET" ]; then
+            triplet_args+=(--triplet "$VCPKG_TRIPLET")
+          fi
+          if ! $VCPKG_ROOT/vcpkg install "${triplet_args[@]}" --x-install-root="$VCPKG_ROOT/installed"; then
             find "${VCPKG_ROOT}/" -name "*.log" -print -exec cat {} \;
             exit 1
           fi
 
       - name: Build rustdesk
+        env:
+          MAC_CARGO_TARGET: ${{ matrix.cargo_target }}
+          MAC_BUILD_ARCH: ${{ matrix.mac_arch }}
         run: |
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             MIN_MACOS_VERSION="12.3"

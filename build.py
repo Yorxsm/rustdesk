@@ -932,21 +932,26 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
 
 
 def build_flutter_dmg(version, features):
+    cargo_target = os.environ.get('MAC_CARGO_TARGET', '').strip()
+    target_dir = f'target/{cargo_target}/release' if cargo_target else 'target/release'
+    target_flag = f' --target {cargo_target}' if cargo_target else ''
     if not skip_cargo:
         # set minimum osx build target, now is 10.14, which is the same as the flutter xcode project
         system2(
-            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --locked --features {features} --release')
+            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --locked --features {features} --release{target_flag}')
     # copy dylib
     system2(
-        "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
+        f'cp {target_dir}/liblibrustdesk.dylib {target_dir}/librustdesk.dylib')
     os.chdir('flutter')
     # cargo builds a single-arch dylib for the host; restrict Xcode to the same arch
     # so the universal-by-default ARCHS_STANDARD doesn't try to link a missing slice.
     # FLUTTER_XCODE_* env vars are forwarded to xcodebuild as build settings.
-    mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
+    mac_arch = os.environ.get('MAC_BUILD_ARCH', '').strip()
+    if not mac_arch:
+        mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
     system2(
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
-    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
+    system2(f'cp -rf ../{target_dir}/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
     '''
     system2(
         "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")
