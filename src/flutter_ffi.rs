@@ -1155,7 +1155,7 @@ pub fn main_issue_help_invite() -> String {
     }
     match crate::help_invite::issue_token_blocking() {
         Ok(token) => {
-            let link = format!("{}help/{id}?invite={token}", crate::get_uri_prefix());
+            let link = crate::help_invite::invite_page_url(&id, &token);
             if let Err(err) = copy_invite_link(&link) {
                 log::warn!("Invite link was not placed on the clipboard: {err}");
             }

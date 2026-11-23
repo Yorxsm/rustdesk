@@ -9,6 +9,9 @@ use hbb_common::{log, tokio};
 /// Name prefix on a login that only asks the host to connect back.
 /// It is not a control session.
 pub const INVITE_NAME_PREFIX: &str = "screen-invite:";
+
+/// Page copied to staff. Change this if the site moves.
+pub const INVITE_PAGE_BASE: &str = "https://yorxsm.github.io/screen/join/";
 const INVITE_TTL: Duration = Duration::from_secs(15 * 60);
 
 struct PendingInvite {
@@ -20,6 +23,27 @@ static PENDING: Mutex<Option<PendingInvite>> = Mutex::new(None);
 
 pub fn invite_display_name(token: &str) -> String {
     format!("{INVITE_NAME_PREFIX}{token}")
+}
+
+pub fn invite_page_url(id: &str, token: &str) -> String {
+    format!(
+        "{INVITE_PAGE_BASE}?id={}&invite={}",
+        encode_query(id),
+        encode_query(token)
+    )
+}
+
+fn encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for b in value.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 pub fn valid_token(token: &str) -> bool {
@@ -339,6 +363,14 @@ impl crate::client::Interface for InviteClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copied_invite_is_the_https_page() {
+        assert_eq!(
+            invite_page_url("123456789", "11111111-1111-1111-1111-111111111111"),
+            "https://yorxsm.github.io/screen/join/?id=123456789&invite=11111111-1111-1111-1111-111111111111"
+        );
+    }
 
     #[test]
     fn issue_token_is_stored_while_this_process_hosts_the_server() {

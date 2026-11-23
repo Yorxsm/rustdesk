@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>screen</title>
+<style>
+body { margin: 0; background: #fff; color: #000; font: 17px/1.5 -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 420px; margin: 0 auto; padding: 64px 24px 80px; }
+.mark { margin: 0 0 48px; font-size: 15px; }
+h1 { margin: 36px 0 12px; font-size: 17px; font-weight: 600; }
+p { margin: 0 0 16px; }
+a.btn { display: block; margin: 0 0 8px; padding: 12px 14px; background: #000; color: #fff; text-align: center; text-decoration: none; border-radius: 4px; }
+a.btn:hover { background: #333; }
+.alt { font-size: 14px; }
+.alt a { color: inherit; }
+@media (prefers-color-scheme: dark) {
+  body { background: #000; color: #fff; }
+  a.btn { background: #fff; color: #000; }
+  a.btn:hover { background: #ddd; }
+}
+</style>
+</head>
+<body>
+<main>
+<p class="mark">screen</p>
+<h1>1. Install</h1>
+<div id="primary"></div>
+<p class="alt" id="others"></p>
+<p>These builds are unsigned. On Windows, choose More info, then Run anyway. On a Mac, right-click the app and choose Open.</p>
+<h1>2. Open</h1>
+<div id="open"></div>
+<h1>3. Allow help</h1>
+<p>When screen asks, click Accept to let them help you. Nobody can see or control your screen until you click Accept.</p>
+</main>
+<script>
+(function () {
+  var files = {
+    win: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-windows-x64.msi", "Download for Windows"],
+    arm: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-mac-apple-silicon.dmg", "Download for Mac"],
+    intel: ["https://github.com/Yorxsm/screen/releases/latest/download/screen-mac-intel.dmg", "Download for Mac"]
+  };
+  var labels = { win: "Windows", arm: "Mac Apple Silicon", intel: "Mac Intel" };
+
+  function button(parent, href, text) {
+    var a = document.createElement("a");
+    a.className = "btn";
+    a.href = href;
+    a.textContent = text;
+    parent.appendChild(a);
+  }
+
+  function renderer() {
+    try {
+      var canvas = document.createElement("canvas");
+      var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      if (!gl) return "";
+      var info = gl.getExtension("WEBGL_debug_renderer_info");
+      return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || "") : "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function kindFromArch(arch) {
+    arch = String(arch || "").toLowerCase();
+    if (arch === "arm" || arch === "arm64") return "arm";
+    if (arch === "x86" || arch === "x86_64") return "intel";
+    return "";
+  }
+
+  function macKind() {
+    var gpu = renderer();
+    if (/Apple/i.test(gpu)) return "arm";
+    if (/Intel/i.test(gpu)) return "intel";
+    return "mac";
+  }
+
+  function draw(kind) {
+    var primary = document.getElementById("primary");
+    var others = document.getElementById("others");
+    var keys = ["win", "arm", "intel"];
+    var mainKeys = kind === "win" || kind === "arm" || kind === "intel" ? [kind] : kind === "mac" ? ["arm", "intel"] : keys;
+    var i;
+    for (i = 0; i < mainKeys.length; i++) button(primary, files[mainKeys[i]][0], files[mainKeys[i]][1]);
+    var spare = [];
+    for (i = 0; i < keys.length; i++) if (mainKeys.indexOf(keys[i]) < 0) spare.push(keys[i]);
+    if (!spare.length) return;
+    others.appendChild(document.createTextNode("Other versions: "));
+    for (i = 0; i < spare.length; i++) {
+      if (i) others.appendChild(document.createTextNode(", "));
+      var a = document.createElement("a");
+      a.href = files[spare[i]][0];
+      a.textContent = labels[spare[i]];
+      others.appendChild(a);
+    }
+  }
+
+  function openLink() {
+    var params = new URLSearchParams(location.search);
+    var id = params.get("id") || "";
+    var invite = params.get("invite") || "";
+    var slot = document.getElementById("open");
+    if (!/^[0-9]{1,32}$/.test(id) || !/^[A-Za-z0-9._~-]{1,128}$/.test(invite)) {
+      slot.textContent = "This page needs the invite link you were sent.";
+      return;
+    }
+    var a = document.createElement("a");
+    a.className = "btn";
+    a.href = "rustdesk://help/" + id + "?invite=" + encodeURIComponent(invite);
+    a.textContent = "Open screen";
+    slot.appendChild(a);
+  }
+
+  var ua = navigator.userAgent || "";
+  if (/Windows/i.test(ua)) draw("win");
+  else if (!/Macintosh|Mac OS X/i.test(ua)) draw("other");
+  else if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+    navigator.userAgentData.getHighEntropyValues(["architecture"]).then(function (v) {
+      draw(kindFromArch(v && v.architecture) || macKind());
+    }).catch(function () { draw(macKind()); });
+  } else draw(macKind());
+  openLink();
+})();
+</script>
+</body>
+</html>
