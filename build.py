@@ -942,6 +942,11 @@ def build_flutter_dmg(version, features):
     # copy dylib
     system2(
         f'cp {target_dir}/liblibrustdesk.dylib {target_dir}/librustdesk.dylib')
+    # The Xcode project links ../../target/release, not the cargo --target directory.
+    if cargo_target:
+        os.makedirs('target/release', exist_ok=True)
+        system2(f'cp {target_dir}/liblibrustdesk.dylib target/release/liblibrustdesk.dylib')
+        system2(f'cp {target_dir}/librustdesk.dylib target/release/librustdesk.dylib')
     os.chdir('flutter')
     # cargo builds a single-arch dylib for the host; restrict Xcode to the same arch
     # so the universal-by-default ARCHS_STANDARD doesn't try to link a missing slice.
