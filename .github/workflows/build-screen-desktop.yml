@@ -481,7 +481,7 @@ jobs:
           rm -f "$RW" "$DMG"
           # -srcfolder on current macOS writes a GPT disk. Archive Utility then
           # fails near the end of that image. A layout-none volume does not.
-          hdiutil create -size "${MB}m" -fs HFS+ -volname screen -layout NONE -format UDRW -ov "$RW"
+          hdiutil create -size "${MB}m" -fs HFS+ -volname screen -layout NONE -ov "$RW"
           RW_MNT="${RUNNER_TEMP}/screen-rw-mount"
           rm -rf "$RW_MNT"
           mkdir -p "$RW_MNT"
