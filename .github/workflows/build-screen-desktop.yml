@@ -261,10 +261,19 @@ jobs:
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
-          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-            Get-Content $log -Tail 60
-            throw "msiexec exited $($proc.ExitCode)"
+          # -Wait follows the tray app msiexec starts, so it never returns.
+          Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -WindowStyle Hidden
+          $deadline = (Get-Date).AddSeconds(180)
+          while ((Get-Process msiexec -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Get-Process msiexec -ErrorAction SilentlyContinue) {
+            taskkill /F /IM msiexec.exe | Out-Null
+            throw "msiexec timed out"
+          }
+          $tail = Get-Content $log -Tail 40
+          $tail | Select-Object -Last 8
+          $status = $tail | Select-String -Pattern "Installation success or error status:" | Select-Object -Last 1
+          if (-not $status -or ($status.Line -notmatch "status: 0" -and $status.Line -notmatch "status: 3010")) {
+            throw "msiexec failed: $status"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
@@ -683,10 +692,18 @@ jobs:
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
-          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-            Get-Content $log -Tail 80
-            throw "public msi exited $($proc.ExitCode)"
+          Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -WindowStyle Hidden
+          $deadline = (Get-Date).AddSeconds(180)
+          while ((Get-Process msiexec -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Get-Process msiexec -ErrorAction SilentlyContinue) {
+            taskkill /F /IM msiexec.exe | Out-Null
+            throw "public msiexec timed out"
+          }
+          $tail = Get-Content $log -Tail 40
+          $status = $tail | Select-String -Pattern "Installation success or error status:" | Select-Object -Last 1
+          if (-not $status -or ($status.Line -notmatch "status: 0" -and $status.Line -notmatch "status: 3010")) {
+            $tail | Select-Object -Last 20
+            throw "public msi failed: $status"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
