@@ -260,18 +260,38 @@ jobs:
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
-          Set-Content -Path "$($msi.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          # A full wizard waits for Next and holds the installer lock. /qn is the
-          # same msiexec /i path, with the download's Mark of the Web still set.
-          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -PassThru
-          if (-not $proc.WaitForExit(180000)) {
+          $clean = Join-Path $env:RUNNER_TEMP "screen-clean.msi"
+          Copy-Item $msi.Path $clean
+          $motw = Join-Path $env:RUNNER_TEMP "screen-motw.msi"
+          Copy-Item $msi.Path $motw
+          Set-Content -Path "${motw}:Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
+          $motwJob = Start-Job -ScriptBlock {
+            param($msi, $log)
+            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
+            return $p.ExitCode
+          } -ArgumentList $motw, "$log.motw"
+          if (-not (Wait-Job $motwJob -Timeout 90)) {
+            Stop-Job $motwJob
             taskkill /F /IM msiexec.exe | Out-Null
-            Get-Content $log -Tail 40
+            Write-Host "MOTW msiexec did not finish in 90s"
+          } else {
+            Write-Host "MOTW msiexec exited $(Receive-Job $motwJob)"
+          }
+          $job = Start-Job -ScriptBlock {
+            param($msi, $log)
+            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
+            return $p.ExitCode
+          } -ArgumentList $clean, $log
+          if (-not (Wait-Job $job -Timeout 180)) {
+            Stop-Job $job
+            taskkill /F /IM msiexec.exe | Out-Null
+            if (Test-Path $log) { Get-Content $log -Tail 40 }
             throw "msiexec timed out"
           }
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+          $code = Receive-Job $job
+          if ($code -ne 0 -and $code -ne 3010) {
             Get-Content $log -Tail 60
-            throw "msiexec exited $($proc.ExitCode)"
+            throw "msiexec exited $code"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
@@ -645,16 +665,38 @@ jobs:
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
-          Set-Content -Path "$($msi.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -PassThru
-          if (-not $proc.WaitForExit(180000)) {
+          $clean = Join-Path $env:RUNNER_TEMP "screen-public-clean.msi"
+          Copy-Item $msi.Path $clean
+          $motw = Join-Path $env:RUNNER_TEMP "screen-public-motw.msi"
+          Copy-Item $msi.Path $motw
+          Set-Content -Path "${motw}:Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
+          $motwJob = Start-Job -ScriptBlock {
+            param($msi, $log)
+            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
+            return $p.ExitCode
+          } -ArgumentList $motw, "$log.motw"
+          if (-not (Wait-Job $motwJob -Timeout 90)) {
+            Stop-Job $motwJob
             taskkill /F /IM msiexec.exe | Out-Null
-            Get-Content $log -Tail 40
+            Write-Host "public MOTW msiexec did not finish in 90s"
+          } else {
+            Write-Host "public MOTW msiexec exited $(Receive-Job $motwJob)"
+          }
+          $job = Start-Job -ScriptBlock {
+            param($msi, $log)
+            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
+            return $p.ExitCode
+          } -ArgumentList $clean, $log
+          if (-not (Wait-Job $job -Timeout 180)) {
+            Stop-Job $job
+            taskkill /F /IM msiexec.exe | Out-Null
+            if (Test-Path $log) { Get-Content $log -Tail 40 }
             throw "public msiexec timed out"
           }
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+          $code = Receive-Job $job
+          if ($code -ne 0 -and $code -ne 3010) {
             Get-Content $log -Tail 80
-            throw "public msi exited $($proc.ExitCode)"
+            throw "public msi exited $code"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
