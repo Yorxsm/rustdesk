@@ -2252,25 +2252,13 @@ setEnvTerminalAdmin() {
   bind.mainSetEnv(key: 'IS_TERMINAL_ADMIN', value: 'Y');
 }
 
+/// Set while a cold start is opening an invite, so the main window stays visible.
+bool openHelpInviteOnLaunch = false;
+
 Future<void> beginHelpInvite(String hostId, String token) async {
+  // Click is the only way this computer can be controlled. A password or a
+  // remembered session must not skip the Accept button.
   await gFFI.serverModel.setApproveMode('click');
-  final context = globalKey.currentContext;
-  if (context != null) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(translate('Share screen')),
-        content: Text(translate(
-            'Click Accept on the next prompt. This computer stays under your control until you do.')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(translate('Close')),
-          ),
-        ],
-      ),
-    );
-  }
   final started = await bind.mainSendHelpInvite(hostId: hostId, token: token);
   if (!started) {
     showToast(translate('Failed'));
@@ -2283,7 +2271,7 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   if (cmdArgs != null && cmdArgs.isNotEmpty) {
     args = cmdArgs;
     // rustdesk <uri link>
-    if (args[0].startsWith(bind.mainUriPrefixSync())) {
+    if (args[0].startsWith('rustdesk://') || args[0].startsWith('screen://')) {
       final uri = Uri.tryParse(args[0]);
       if (uri != null) {
         args = urlLinkToCmdArgs(uri);
@@ -2383,8 +2371,12 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
     password = null;
   }
   if (helpHostId != null && helpToken != null) {
+    if (openHelpInviteOnLaunch) {
+      return true;
+    }
     final hostId = helpHostId;
     final token = helpToken;
+    openHelpInviteOnLaunch = true;
     Future.delayed(const Duration(milliseconds: 400), () {
       beginHelpInvite(hostId!, token!);
     });

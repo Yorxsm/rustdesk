@@ -2160,8 +2160,15 @@ pub fn make_empty_dirs_response_to_json(res: &ReadEmptyDirsResponse) -> String {
 /// 2. If failed to send the url scheme, we open a new main window to handle this url scheme.
 pub fn handle_url_scheme(url: String) {
     #[cfg(not(target_os = "ios"))]
-    if let Err(err) = crate::ipc::send_url_scheme(url.clone()) {
-        log::debug!("Send the url to the existing flutter process failed, {}. Let's open a new program to handle this.", err);
+    {
+        // Cold start delivers the URL before the main window is listening.
+        for _ in 0..25 {
+            if crate::ipc::send_url_scheme(url.clone()).is_ok() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        log::debug!("No running window accepted the link. Opening one.");
         let _ = crate::run_me(vec![url]);
     }
 }
@@ -2701,12 +2708,18 @@ pub fn read_custom_client(config: &str) {
 }
 
 #[inline]
+pub fn is_app_link(arg: &str) -> bool {
+    arg.starts_with("rustdesk://") || arg.starts_with("screen://")
+}
+
 pub fn is_empty_uni_link(arg: &str) -> bool {
-    let prefix = crate::get_uri_prefix();
-    if !arg.starts_with(&prefix) {
+    let Some((_, rest)) = arg.split_once("://") else {
+        return false;
+    };
+    if !is_app_link(arg) {
         return false;
     }
-    arg[prefix.len()..].chars().all(|c| c == '/')
+    rest.chars().all(|c| c == '/')
 }
 
 pub fn get_hwid() -> Bytes {

@@ -260,6 +260,17 @@ jobs:
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
+          Set-Content -Path "$($msi.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
+          $ui = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/l*v", "$log.ui") -PassThru
+          if ($ui.WaitForExit(20000)) {
+            if ($ui.ExitCode -ne 0 -and $ui.ExitCode -ne 3010) {
+              if (Test-Path "$log.ui") { Get-Content "$log.ui" -Tail 40 }
+              throw "double-click msiexec exited $($ui.ExitCode)"
+            }
+          } else {
+            Stop-Process -Id $ui.Id -Force -ErrorAction SilentlyContinue
+            Get-Process msiexec -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
           $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
           if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 60
@@ -269,6 +280,16 @@ jobs:
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
           & $installed.FullName --version
           if ($LASTEXITCODE -ne 0) { throw "installed app did not run" }
+          $gui = Start-Process $installed.FullName -PassThru
+          Start-Sleep -Seconds 8
+          if ($gui.HasExited) { throw "installed app GUI exited $($gui.ExitCode)" }
+          Stop-Process -Id $gui.Id -Force
+          Set-Content -Path "$($exe.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
+          $port = Start-Process $exe.Path -PassThru
+          Start-Sleep -Seconds 8
+          $child = Get-Process | Where-Object { $_.ProcessName -match "rustdesk" }
+          if ($port.HasExited -and -not $child) { throw "portable exe exited $($port.ExitCode) and did not start the app" }
+          Get-Process | Where-Object { $_.ProcessName -match "rustdesk" } | Stop-Process -Force -ErrorAction SilentlyContinue
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -489,7 +510,10 @@ jobs:
           ditto "${STAGE}/RustDesk.app" "$RW_MNT/RustDesk.app"
           ln -s /Applications "$RW_MNT/Applications"
           hdiutil detach "$RW_MNT"
-          hdiutil convert "$RW" -format ULFO -ov -o "${DMG%.dmg}"
+          # ULFO/UDZO start with bvx2 or a zlib header. Archive Utility then
+          # tries to expand the disk image and fails near the end. UDRO is the
+          # same HFS volume with no compression magic.
+          hdiutil convert "$RW" -format UDRO -ov -o "${DMG%.dmg}"
           if [ ! -f "$DMG" ] && [ -f "${DMG}.dmg" ]; then
             mv "${DMG}.dmg" "$DMG"
           fi
@@ -505,7 +529,29 @@ jobs:
           xml = data[xml_off:xml_off+xml_len].decode("utf-8", "replace")
           if "Protective Master Boot Record" in xml or "GPT Header" in xml:
               sys.exit("dmg is a partitioned disk image")
+          head = data[:4]
+          if head.startswith(b"bvx") or head[:2] in (b"\x78\x9c", b"\x78\xda", b"\x78\x01") or head.startswith(b"BZh"):
+              sys.exit("dmg starts with a compression header")
           PY
+          xattr -w com.apple.quarantine "0083;$(date +%s);Safari;screen" "$DMG"
+          open "$DMG"
+          mounted=0
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if [ -d /Volumes/screen/RustDesk.app ]; then
+              mounted=1
+              break
+            fi
+            sleep 1
+          done
+          test "$mounted" = 1
+          test -x /Volumes/screen/RustDesk.app/Contents/MacOS/RustDesk
+          hdiutil detach /Volumes/screen || hdiutil detach -force /Volumes/screen
+          UNZ="${RUNNER_TEMP}/screen-unz"
+          rm -rf "$UNZ"
+          xattr -w com.apple.quarantine "0083;$(date +%s);Safari;screen" "dist/${MAC_DIST}.zip"
+          ditto -x -k "dist/${MAC_DIST}.zip" "$UNZ"
+          test -e "$UNZ/RustDesk.app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"
+          test -s "$UNZ/RustDesk.app/Contents/Frameworks/liblibrustdesk.dylib"
           unzip -t "dist/${MAC_DIST}.zip" >/dev/null
           hdiutil verify "$DMG"
           MNT="${RUNNER_TEMP}/screen-dmg-mount"
@@ -602,6 +648,17 @@ jobs:
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
+          Set-Content -Path "$($msi.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
+          $ui = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/l*v", "$log.ui") -PassThru
+          if ($ui.WaitForExit(20000)) {
+            if ($ui.ExitCode -ne 0 -and $ui.ExitCode -ne 3010) {
+              if (Test-Path "$log.ui") { Get-Content "$log.ui" -Tail 40 }
+              throw "public double-click msiexec exited $($ui.ExitCode)"
+            }
+          } else {
+            Stop-Process -Id $ui.Id -Force -ErrorAction SilentlyContinue
+            Get-Process msiexec -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
           $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
           if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 80
@@ -612,6 +669,10 @@ jobs:
           $app = Start-Process $installed.FullName -ArgumentList "--version" -PassThru
           if (-not $app.WaitForExit(20000)) { Stop-Process $app -Force; throw "installed app did not exit" }
           if ($app.ExitCode -ne 0) { throw "installed app exited $($app.ExitCode)" }
+          $gui = Start-Process $installed.FullName -PassThru
+          Start-Sleep -Seconds 8
+          if ($gui.HasExited) { throw "public app GUI exited $($gui.ExitCode)" }
+          Stop-Process -Id $gui.Id -Force
 
       - name: Check Mac files
         if: runner.os == 'macOS'
@@ -634,9 +695,21 @@ jobs:
               xml = data[xml_off:xml_off+xml_len].decode("utf-8", "replace")
               if "Protective Master Boot Record" in xml or "GPT Header" in xml:
                   sys.exit(f"{name} is a partitioned disk image")
+              head = data[:4]
+              if head.startswith(b"bvx") or head[:2] in (b"\x78\x9c", b"\x78\xda", b"\x78\x01") or head.startswith(b"BZh"):
+                  sys.exit(f"{name} starts with a compression header")
           PY
           for dmg in dist/screen-mac-intel.dmg dist/screen-mac-apple-silicon.dmg; do
             hdiutil verify "$dmg"
+            xattr -w com.apple.quarantine "0083;$(date +%s);Safari;screen" "$dmg"
+            open "$dmg"
+            mounted=0
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              if [ -d /Volumes/screen/RustDesk.app ]; then mounted=1; break; fi
+              sleep 1
+            done
+            test "$mounted" = 1
+            hdiutil detach /Volumes/screen || hdiutil detach -force /Volumes/screen
             mnt="${RUNNER_TEMP}/$(basename "$dmg").mnt"
             mkdir -p "$mnt"
             hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt"

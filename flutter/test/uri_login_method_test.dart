@@ -46,6 +46,16 @@ void main() {
       ],
     );
     expect(urlLinkToCmdArgs(Uri.parse('rustdesk://help/123456789')), null);
+    expect(
+      urlLinkToCmdArgs(Uri.parse(
+          'screen://help/123456789?invite=11111111-1111-1111-1111-111111111111')),
+      [
+        '--help-invite',
+        '123456789',
+        '--invite-token',
+        '11111111-1111-1111-1111-111111111111',
+      ],
+    );
   });
 
   test('request-approval ignores an explicit password in either order', () {

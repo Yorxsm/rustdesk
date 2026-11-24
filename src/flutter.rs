@@ -124,7 +124,29 @@ pub extern "C" fn rustdesk_core_main() -> bool {
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     match crate::core_main::core_main() {
-        Some(crate::core_main::CoreMainAction::StartUi(_)) => return true,
+        Some(crate::core_main::CoreMainAction::StartUi(args)) => {
+            if let Some(url) = args.into_iter().find(|arg| crate::common::is_app_link(arg)) {
+                std::thread::spawn(move || {
+                    let event = serde_json::json!({
+                        "name": "on_url_scheme_received",
+                        "url": url,
+                    })
+                    .to_string();
+                    for _ in 0..50 {
+                        if crate::flutter::push_global_event(
+                            crate::flutter::APP_TYPE_MAIN,
+                            event.clone(),
+                        )
+                        .is_some()
+                        {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                });
+            }
+            return true;
+        }
         Some(crate::core_main::CoreMainAction::ExitFailure(err)) => {
             eprintln!("Command failed: {err}");
             log::error!("Command failed: {err}");

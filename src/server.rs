@@ -792,7 +792,25 @@ async fn start_gui_ipc() -> ResultType<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(
+    feature = "flutter",
+    not(any(target_os = "android", target_os = "ios"))
+))]
+fn deliver_main_event(event: String) {
+    std::thread::spawn(move || {
+        for _ in 0..50 {
+            if crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, event.clone())
+                .is_some()
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        log::warn!("No main window accepted a link");
+    });
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tokio::main(flavor = "current_thread")]
 pub async fn start_ipc_url_server() {
     log::debug!("Start an ipc server for listening to url schemes");
@@ -808,13 +826,19 @@ pub async fn start_ipc_url_server() {
                             m.insert("name", "on_url_scheme_received");
                             m.insert("url", url.as_str());
                             let event = serde_json::to_string(&m).unwrap_or("".to_owned());
-                            match crate::flutter::push_global_event(
-                                crate::flutter::APP_TYPE_MAIN,
-                                event,
-                            ) {
-                                None => log::warn!("No main window app found!"),
-                                Some(..) => {}
-                            }
+                            deliver_main_event(event);
+                        }
+                        #[cfg(feature = "flutter")]
+                        Data::HelpInviteReady(staff_id) => {
+                            std::thread::spawn(move || {
+                                for _ in 0..50 {
+                                    if crate::help_invite::push_staff_ready(&staff_id) {
+                                        return;
+                                    }
+                                    std::thread::sleep(std::time::Duration::from_millis(100));
+                                }
+                                log::warn!("No main window accepted the invite");
+                            });
                         }
                         _ => {
                             log::warn!("An unexpected data was sent to the ipc url server.")

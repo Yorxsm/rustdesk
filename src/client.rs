@@ -3823,10 +3823,7 @@ impl LoginConfigHandler {
         if display_name.is_empty() {
             display_name = crate::username();
         }
-        if !self.help_invite_token.is_empty() {
-            display_name = crate::help_invite::invite_display_name(&self.help_invite_token);
-        }
-        let display_name = display_name
+        let mut display_name = display_name
             .split_whitespace()
             .map(|word| {
                 word.chars()
@@ -3842,6 +3839,11 @@ impl LoginConfigHandler {
             })
             .collect::<Vec<_>>()
             .join(" ");
+        // Applied after title case. "screen-invite:" must stay lowercase or the
+        // host treats the login as a request to control this computer.
+        if !self.help_invite_token.is_empty() {
+            display_name = crate::help_invite::invite_display_name(&self.help_invite_token);
+        }
         #[cfg(not(target_os = "android"))]
         let my_platform = hbb_common::whoami::platform().to_string();
         #[cfg(target_os = "android")]

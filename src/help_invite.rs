@@ -88,8 +88,21 @@ pub enum Incoming {
     Rejected,
 }
 
+fn invite_token(my_name: &str) -> Option<&str> {
+    let prefix = INVITE_NAME_PREFIX;
+    if my_name.len() < prefix.len() {
+        return None;
+    }
+    if !my_name[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    Some(&my_name[prefix.len()..])
+}
+
 pub fn incoming(my_name: &str, my_id: &str) -> Incoming {
-    let Some(token) = my_name.strip_prefix(INVITE_NAME_PREFIX) else {
+    // Title case used to rewrite "screen-invite:" into "Screen-invite:", which
+    // missed this prefix and was then handled as a normal control login.
+    let Some(token) = invite_token(my_name) else {
         return Incoming::NotInvite;
     };
     if !valid_token(token) || !valid_peer_id(my_id) || !take_invite(token) {
@@ -99,14 +112,24 @@ pub fn incoming(my_name: &str, my_id: &str) -> Incoming {
 }
 
 pub fn notify_host(staff_id: String) {
-    #[cfg(all(feature = "flutter", any(target_os = "android", target_os = "ios")))]
-    {
-        push_staff_ready(&staff_id);
+    #[cfg(feature = "flutter")]
+    if push_staff_ready(&staff_id) {
         return;
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         hbb_common::tokio::spawn(async move {
+            // The connection-manager window is not open yet on a fresh invite.
+            // The main window listens on "_url".
+            if let Ok(mut conn) = crate::ipc::connect(1000, "_url").await {
+                if conn
+                    .send(&crate::ipc::Data::HelpInviteReady(staff_id.clone()))
+                    .await
+                    .is_ok()
+                {
+                    return;
+                }
+            }
             match crate::ipc::connect(1000, "_cm").await {
                 Ok(mut conn) => {
                     hbb_common::allow_err!(
@@ -122,15 +145,12 @@ pub fn notify_host(staff_id: String) {
 }
 
 #[cfg(feature = "flutter")]
-pub(crate) fn push_staff_ready(staff_id: &str) {
+pub(crate) fn push_staff_ready(staff_id: &str) -> bool {
     let event = serde_json::json!({
         "name": "on_staff_ready",
         "id": staff_id,
     });
-    let _ = crate::flutter::push_global_event(
-        crate::flutter::APP_TYPE_MAIN,
-        event.to_string(),
-    );
+    crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, event.to_string()).is_some()
 }
 
 pub fn push_result(ok: bool, message: &str) {
@@ -407,6 +427,10 @@ mod tests {
         }
         assert!(matches!(incoming(&name, staff_id), Incoming::Rejected));
         assert!(matches!(incoming("Ada", staff_id), Incoming::NotInvite));
+        let titled = format!("Screen-invite:{token}");
+        assert!(matches!(incoming(&titled, staff_id), Incoming::Rejected));
+        assert!(store_invite(&token));
+        assert!(matches!(incoming(&titled, staff_id), Incoming::Callback(_)));
         assert!(matches!(
             incoming(&invite_display_name("not-a-uuid"), staff_id),
             Incoming::Rejected

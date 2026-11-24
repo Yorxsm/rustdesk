@@ -3108,7 +3108,7 @@ impl Connection {
                         .await;
                 }
                 return true;
-            } else if self.is_recent_session(false) {
+            } else if !lr.password.is_empty() && self.is_recent_session(false) {
                 if !self.send_logon_response_and_keep_alive().await {
                     return false;
                 }

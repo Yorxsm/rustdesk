@@ -75,6 +75,15 @@
 				</RegistryKey>
 			</Component>
 
+			<Component Id="Product.Registry.ScreenURLProtocol" Guid="7B1E4C2A-9F63-4D18-A5E0-2C8B6F41D903">
+				<RegistryKey Root="HKCR" Key="screen">
+					<RegistryValue Type="string" Name="URL Protocol" Value="" />
+				</RegistryKey>
+				<RegistryKey Root="HKCR" Key="screen\shell\open\command">
+					<RegistryValue Type="string" Value='"[INSTALLFOLDER_INNER]$(var.Product).exe" "%1"' />
+				</RegistryKey>
+			</Component>
+
 			<Component Id="Product.Registry.Command" Guid="BC8D581C-5960-4843-93DC-E347CD43BD49">
 				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell" />
 				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell\open" />

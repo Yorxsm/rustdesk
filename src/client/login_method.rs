@@ -69,6 +69,19 @@ mod tests {
     }
 
     #[test]
+    fn help_invite_login_name_keeps_its_prefix() {
+        let mut lc = client::LoginConfigHandler::default();
+        let token = "11111111-1111-1111-1111-111111111111";
+        assert!(lc.set_login_method(&format!("help-invite:{token}")));
+        let request = lc.create_login_msg(String::new(), String::new(), Vec::new());
+        assert_eq!(
+            request.login_request().my_name,
+            format!("screen-invite:{token}")
+        );
+        assert!(request.login_request().password.is_empty());
+    }
+
+    #[test]
     fn session_creation_initializes_login_method() {
         let remote_id = hbb_common::config::LocalConfig::get_remote_id();
         for method in ["", "request-approval"] {
@@ -110,11 +123,11 @@ mod tests {
             assert!(monitor_result.0.is_empty(), "{}", monitor_result.0);
             assert_eq!(methods, [Some(method.to_owned()), Some(method.to_owned())]);
             let session = session.unwrap();
-            let request = session
-                .lc
-                .read()
-                .unwrap()
-                .create_login_msg(String::new(), String::new(), vec![1; 32]);
+            let request = session.lc.read().unwrap().create_login_msg(
+                String::new(),
+                String::new(),
+                vec![1; 32],
+            );
             assert_eq!(
                 request.login_request().password.is_empty(),
                 method == "request-approval"

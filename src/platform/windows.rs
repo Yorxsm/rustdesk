@@ -1663,6 +1663,37 @@ fn get_after_install(
     ", create_service=get_create_service(&exe))
 }
 
+pub fn register_user_url_schemes() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let command = format!("\"{}\" \"%1\"", exe.to_string_lossy());
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    for scheme in ["screen", "rustdesk"] {
+        let (key, _) = match hkcu.create_subkey(format!(r"Software\Classes\{scheme}")) {
+            Ok(key) => key,
+            Err(err) => {
+                log::warn!("Could not register {scheme} links: {err}");
+                continue;
+            }
+        };
+        if let Err(err) = key.set_value("URL Protocol", &"") {
+            log::warn!("Could not register {scheme} links: {err}");
+        }
+        let command_path = format!(r"Software\Classes\{scheme}\shell\open\command");
+        let (command_key, _) = match hkcu.create_subkey(&command_path) {
+            Ok(key) => key,
+            Err(err) => {
+                log::warn!("Could not register {scheme} links: {err}");
+                continue;
+            }
+        };
+        if let Err(err) = command_key.set_value("", &command) {
+            log::warn!("Could not register {scheme} links: {err}");
+        }
+    }
+}
+
 pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> ResultType<()> {
     // MSI and EXE installations use different registry layouts, so MSI-to-EXE upgrades are not supported.
     let (installed_subkey, _, _, _) = get_install_info();

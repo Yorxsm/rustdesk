@@ -182,10 +182,20 @@ pub fn core_main() -> Option<CoreMainAction> {
     }
     hbb_common::init_log(false, &log_name);
 
-    // linux uni (url) go here.
-    #[cfg(all(target_os = "linux", feature = "flutter"))]
-    if args.len() > 0 && args[0].starts_with(&crate::get_uri_prefix()) {
-        return try_send_by_dbus(args[0].clone()).map(CoreMainAction::StartUi);
+    // A link must reach the running window, or be handed to the UI we start.
+    #[cfg(feature = "flutter")]
+    if let Some(url) = args.first().filter(|arg| crate::common::is_app_link(arg)) {
+        #[cfg(target_os = "linux")]
+        {
+            return try_send_by_dbus(url.clone()).map(CoreMainAction::StartUi);
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            if crate::ipc::send_url_scheme(url.clone()).is_ok() {
+                return None;
+            }
+            flutter_args.push(url.clone());
+        }
     }
 
     #[cfg(windows)]
@@ -718,6 +728,8 @@ pub fn core_main() -> Option<CoreMainAction> {
         }
     }
     //_async_logger_holder.map(|x| x.flush());
+    #[cfg(windows)]
+    crate::platform::register_user_url_schemes();
     #[cfg(feature = "flutter")]
     return Some(CoreMainAction::StartUi(flutter_args));
     #[cfg(not(feature = "flutter"))]
@@ -847,8 +859,7 @@ fn try_send_by_dbus(uni_links: String) -> Option<Vec<String>> {
         }
         Err(err) => {
             log::error!("{}", err.as_ref());
-            // return Some to invoke this url by self
-            return Some(Vec::new());
+            return Some(vec![uni_links]);
         }
     }
 }

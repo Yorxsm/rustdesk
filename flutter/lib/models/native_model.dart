@@ -161,16 +161,14 @@ class PlatformFFI {
       }
       _ffiBind = RustdeskImpl(dylib);
 
-      if (isLinux) {
-        if (isMain) {
-          // Start a dbus service for uri links, no need to await
-          _ffiBind.mainStartDbusServer();
-        }
-      } else if (isMacOS && isMain) {
-        // Start ipc service for uri links.
+      _startListenEvent(_ffiBind); // global event, before links arrive
+      if (isLinux && isMain) {
+        // Start a dbus service for uri links, no need to await
+        _ffiBind.mainStartDbusServer();
+      }
+      if (isDesktop && isMain) {
         _ffiBind.mainStartIpcUrlServer();
       }
-      _startListenEvent(_ffiBind); // global event
       try {
         if (isAndroid) {
           // Android file transfer uses app-specific storage. User-selected
