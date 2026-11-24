@@ -301,6 +301,20 @@ jobs:
           Start-Sleep -Seconds 8
           if ($gui.HasExited) { throw "installed app GUI exited $($gui.ExitCode)" }
           Stop-Process -Id $gui.Id -Force
+          Get-Process rustdesk,RustDesk -ErrorAction SilentlyContinue | Stop-Process -Force
+          $coldUrl = "screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
+          $cold = Start-Process $installed.FullName -ArgumentList $coldUrl -PassThru
+          $coldOk = $false
+          for ($i = 0; $i -lt 45; $i++) {
+            $hit = Get-ChildItem "$env:APPDATA","$env:LOCALAPPDATA","$env:ProgramData" -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
+              Select-String -Pattern "Help invite","screen-invite:" -List -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($hit) { Write-Host "cold start log $($hit.Path)"; $coldOk = $true; break }
+            if ($cold.HasExited) { throw "cold start exited $($cold.ExitCode) before the invite flow" }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $coldOk) { throw "cold start did not enter the invite flow" }
+          Stop-Process -Id $cold.Id -Force -ErrorAction SilentlyContinue
           Set-Content -Path "$($exe.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
           $port = Start-Process $exe.Path -PassThru
           Start-Sleep -Seconds 8
@@ -570,6 +584,35 @@ jobs:
           test -e "$UNZ/RustDesk.app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"
           test -s "$UNZ/RustDesk.app/Contents/Frameworks/liblibrustdesk.dylib"
           unzip -t "dist/${MAC_DIST}.zip" >/dev/null
+          # Cold start: nothing is running, the URL is the only argument.
+          # A cross-built arm64 app cannot be executed on the Intel host.
+          HOST_ARCH=$(uname -m)
+          BIN_DESC=$(file "$UNZ/RustDesk.app/Contents/MacOS/RustDesk")
+          if { [ "$HOST_ARCH" = "arm64" ] && echo "$BIN_DESC" | grep -q arm64; } || { [ "$HOST_ARCH" != "arm64" ] && echo "$BIN_DESC" | grep -q x86_64; }; then
+            URL="screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
+            pkill -x RustDesk || true
+            COLD="${RUNNER_TEMP}/cold-start.log"
+            "$UNZ/RustDesk.app/Contents/MacOS/RustDesk" "$URL" >"$COLD" 2>&1 &
+            CPID=$!
+            ok=0
+            for _ in $(seq 1 45); do
+              if grep -R -l -e "Help invite" -e "screen-invite:" "$COLD" "$HOME/Library/Logs" "$HOME/Library/Application Support" >/dev/null 2>&1; then
+                ok=1
+                break
+              fi
+              if ! kill -0 "$CPID" 2>/dev/null; then
+                echo "cold start exited"
+                tail -80 "$COLD" || true
+                break
+              fi
+              sleep 1
+            done
+            kill "$CPID" >/dev/null 2>&1 || true
+            pkill -x RustDesk >/dev/null 2>&1 || true
+            test "$ok" = 1
+          else
+            echo "not launching cross-built app on $HOST_ARCH: $BIN_DESC"
+          fi
           hdiutil verify "$DMG"
           MNT="${RUNNER_TEMP}/screen-dmg-mount"
           rm -rf "$MNT"
@@ -707,6 +750,20 @@ jobs:
           Start-Sleep -Seconds 8
           if ($gui.HasExited) { throw "public app GUI exited $($gui.ExitCode)" }
           Stop-Process -Id $gui.Id -Force
+          Get-Process rustdesk,RustDesk -ErrorAction SilentlyContinue | Stop-Process -Force
+          $coldUrl = "screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
+          $cold = Start-Process $installed.FullName -ArgumentList $coldUrl -PassThru
+          $coldOk = $false
+          for ($i = 0; $i -lt 45; $i++) {
+            $hit = Get-ChildItem "$env:APPDATA","$env:LOCALAPPDATA","$env:ProgramData" -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
+              Select-String -Pattern "Help invite","screen-invite:" -List -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($hit) { Write-Host "public cold start log $($hit.Path)"; $coldOk = $true; break }
+            if ($cold.HasExited) { throw "public cold start exited $($cold.ExitCode)" }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $coldOk) { throw "public cold start did not enter the invite flow" }
+          Stop-Process -Id $cold.Id -Force -ErrorAction SilentlyContinue
 
       - name: Check Mac files
         if: runner.os == 'macOS'
@@ -752,7 +809,30 @@ jobs:
             file "$bin"
             case "$dmg" in
               *apple-silicon*) file "$bin" | grep -q arm64 ;;
-              *) file "$bin" | grep -q x86_64 ;;
+              *)
+                file "$bin" | grep -q x86_64
+                URL="screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
+                pkill -x RustDesk || true
+                COLD="${RUNNER_TEMP}/cold-public.log"
+                "$bin" "$URL" >"$COLD" 2>&1 &
+                CPID=$!
+                ok=0
+                for _ in $(seq 1 45); do
+                  if grep -R -l -e "Help invite" -e "screen-invite:" "$COLD" "$HOME/Library/Logs" "$HOME/Library/Application Support" >/dev/null 2>&1; then
+                    ok=1
+                    break
+                  fi
+                  if ! kill -0 "$CPID" 2>/dev/null; then
+                    echo "public cold start exited"
+                    tail -80 "$COLD" || true
+                    break
+                  fi
+                  sleep 1
+                done
+                kill "$CPID" >/dev/null 2>&1 || true
+                pkill -x RustDesk >/dev/null 2>&1 || true
+                test "$ok" = 1
+                ;;
             esac
             hdiutil detach "$mnt"
           done
