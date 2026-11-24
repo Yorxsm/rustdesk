@@ -259,54 +259,39 @@ jobs:
           $msiHead = [IO.File]::ReadAllBytes($msi)[0..7]
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
+          function Wait-Proc($p, $seconds) {
+            $deadline = (Get-Date).AddSeconds($seconds)
+            while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+            return [bool]$p.HasExited
+          }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
           $clean = Join-Path $env:RUNNER_TEMP "screen-clean.msi"
           Copy-Item $msi.Path $clean
-          $motw = Join-Path $env:RUNNER_TEMP "screen-motw.msi"
-          Copy-Item $msi.Path $motw
-          Set-Content -Path "${motw}:Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          $motwJob = Start-Job -ScriptBlock {
-            param($msi, $log)
-            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
-            return $p.ExitCode
-          } -ArgumentList $motw, "$log.motw"
-          if (-not (Wait-Job $motwJob -Timeout 90)) {
-            Stop-Job $motwJob
-            taskkill /F /IM msiexec.exe | Out-Null
-            Write-Host "MOTW msiexec did not finish in 90s"
-          } else {
-            Write-Host "MOTW msiexec exited $(Receive-Job $motwJob)"
-          }
-          $job = Start-Job -ScriptBlock {
-            param($msi, $log)
-            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
-            return $p.ExitCode
-          } -ArgumentList $clean, $log
-          if (-not (Wait-Job $job -Timeout 180)) {
-            Stop-Job $job
+          $proc = Start-Process msiexec -ArgumentList @("/i", $clean, "/qn", "/l*v", $log) -PassThru
+          if (-not (Wait-Proc $proc 180)) {
             taskkill /F /IM msiexec.exe | Out-Null
             if (Test-Path $log) { Get-Content $log -Tail 40 }
             throw "msiexec timed out"
           }
-          $code = Receive-Job $job
-          if ($code -ne 0 -and $code -ne 3010) {
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 60
-            throw "msiexec exited $code"
+            throw "msiexec exited $($proc.ExitCode)"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
-          & $installed.FullName --version
-          if ($LASTEXITCODE -ne 0) { throw "installed app did not run" }
+          $ver = Start-Process $installed.FullName -ArgumentList "--version" -PassThru
+          if (-not (Wait-Proc $ver 20)) { Stop-Process -Id $ver.Id -Force; throw "installed app --version did not exit" }
+          if ($ver.ExitCode -ne 0) { throw "installed app --version exited $($ver.ExitCode)" }
           $gui = Start-Process $installed.FullName -PassThru
-          Start-Sleep -Seconds 8
-          if ($gui.HasExited) { throw "installed app GUI exited $($gui.ExitCode)" }
+          if ((Wait-Proc $gui 8)) { throw "installed app GUI exited $($gui.ExitCode)" }
           Stop-Process -Id $gui.Id -Force
           Get-Process rustdesk,RustDesk -ErrorAction SilentlyContinue | Stop-Process -Force
           $coldUrl = "screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
           $cold = Start-Process $installed.FullName -ArgumentList $coldUrl -PassThru
           $coldOk = $false
+          $logDirs = @("$env:APPDATA\RustDesk","$env:LOCALAPPDATA\RustDesk","$env:APPDATA\screen","$env:LOCALAPPDATA\screen")
           for ($i = 0; $i -lt 45; $i++) {
-            $hit = Get-ChildItem "$env:APPDATA","$env:LOCALAPPDATA","$env:ProgramData" -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
+            $hit = Get-ChildItem $logDirs -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
               Select-String -Pattern "Help invite","screen-invite:" -List -ErrorAction SilentlyContinue |
               Select-Object -First 1
             if ($hit) { Write-Host "cold start log $($hit.Path)"; $coldOk = $true; break }
@@ -707,55 +692,39 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
+          function Wait-Proc($p, $seconds) {
+            $deadline = (Get-Date).AddSeconds($seconds)
+            while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+            return [bool]$p.HasExited
+          }
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
           $clean = Join-Path $env:RUNNER_TEMP "screen-public-clean.msi"
           Copy-Item $msi.Path $clean
-          $motw = Join-Path $env:RUNNER_TEMP "screen-public-motw.msi"
-          Copy-Item $msi.Path $motw
-          Set-Content -Path "${motw}:Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          $motwJob = Start-Job -ScriptBlock {
-            param($msi, $log)
-            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
-            return $p.ExitCode
-          } -ArgumentList $motw, "$log.motw"
-          if (-not (Wait-Job $motwJob -Timeout 90)) {
-            Stop-Job $motwJob
-            taskkill /F /IM msiexec.exe | Out-Null
-            Write-Host "public MOTW msiexec did not finish in 90s"
-          } else {
-            Write-Host "public MOTW msiexec exited $(Receive-Job $motwJob)"
-          }
-          $job = Start-Job -ScriptBlock {
-            param($msi, $log)
-            $p = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log) -Wait -PassThru
-            return $p.ExitCode
-          } -ArgumentList $clean, $log
-          if (-not (Wait-Job $job -Timeout 180)) {
-            Stop-Job $job
+          $proc = Start-Process msiexec -ArgumentList @("/i", $clean, "/qn", "/l*v", $log) -PassThru
+          if (-not (Wait-Proc $proc 180)) {
             taskkill /F /IM msiexec.exe | Out-Null
             if (Test-Path $log) { Get-Content $log -Tail 40 }
             throw "public msiexec timed out"
           }
-          $code = Receive-Job $job
-          if ($code -ne 0 -and $code -ne 3010) {
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 80
-            throw "public msi exited $code"
+            throw "public msi exited $($proc.ExitCode)"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
-          $app = Start-Process $installed.FullName -ArgumentList "--version" -PassThru
-          if (-not $app.WaitForExit(20000)) { Stop-Process $app -Force; throw "installed app did not exit" }
-          if ($app.ExitCode -ne 0) { throw "installed app exited $($app.ExitCode)" }
+          $ver = Start-Process $installed.FullName -ArgumentList "--version" -PassThru
+          if (-not (Wait-Proc $ver 20)) { Stop-Process -Id $ver.Id -Force; throw "public app --version did not exit" }
+          if ($ver.ExitCode -ne 0) { throw "public app --version exited $($ver.ExitCode)" }
           $gui = Start-Process $installed.FullName -PassThru
-          Start-Sleep -Seconds 8
-          if ($gui.HasExited) { throw "public app GUI exited $($gui.ExitCode)" }
+          if ((Wait-Proc $gui 8)) { throw "public app GUI exited $($gui.ExitCode)" }
           Stop-Process -Id $gui.Id -Force
           Get-Process rustdesk,RustDesk -ErrorAction SilentlyContinue | Stop-Process -Force
           $coldUrl = "screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
           $cold = Start-Process $installed.FullName -ArgumentList $coldUrl -PassThru
           $coldOk = $false
+          $logDirs = @("$env:APPDATA\RustDesk","$env:LOCALAPPDATA\RustDesk","$env:APPDATA\screen","$env:LOCALAPPDATA\screen")
           for ($i = 0; $i -lt 45; $i++) {
-            $hit = Get-ChildItem "$env:APPDATA","$env:LOCALAPPDATA","$env:ProgramData" -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
+            $hit = Get-ChildItem $logDirs -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
               Select-String -Pattern "Help invite","screen-invite:" -List -ErrorAction SilentlyContinue |
               Select-Object -First 1
             if ($hit) { Write-Host "public cold start log $($hit.Path)"; $coldOk = $true; break }
