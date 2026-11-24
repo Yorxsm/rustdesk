@@ -40,7 +40,9 @@ g_arpsystemcomponent = {
 }
 
 def default_revision_version():
-    return int(datetime.datetime.now().timestamp() / 60)
+    # Windows Installer ProductVersion fields must be <= 65535.
+    # A larger revision makes the package fail to open.
+    return int(datetime.datetime.now().timestamp() / 60) % 65536
 
 def make_parser():
     parser = argparse.ArgumentParser(description="Msi preprocess script.")
@@ -488,7 +490,7 @@ def init_global_vars(dist_dir, app_name, args):
         return False
     if g_version.count(".") == 2:
         # https://github.com/dotnet/runtime/blob/5535e31a712343a63f5d7d796cd874e563e5ac14/src/libraries/System.Private.CoreLib/src/System/Version.cs
-        if args.revision_version < 0 or args.revision_version > 2147483647:
+        if args.revision_version < 0 or args.revision_version > 65535:
             raise ValueError(f"Invalid revision version: {args.revision_version}")    
         g_version = f"{g_version}.{args.revision_version}"
 

@@ -204,7 +204,17 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          tar -acf "dist/screen-windows-x64.zip" -C rustdesk .
+          python3 - << 'PY'
+          import os, zipfile
+          src = "rustdesk"
+          out = "dist/screen-windows-x64.zip"
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for root, dirs, files in os.walk(src):
+                  for name in files:
+                      path = os.path.join(root, name)
+                      zf.write(path, os.path.relpath(path, src))
+          zipfile.ZipFile(out).testzip()
+          PY
 
       - name: Upload Windows zip
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -230,12 +240,35 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
+          python preprocess.py --arp --manufacturer screen -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
           mv $msi.FullName "../../dist/screen-windows-x64.msi"
           popd
+
+      - name: Test Windows packages
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); bad=z.testzip(); sys.exit(1 if bad else 0)"
+          $exe = Resolve-Path "dist/screen-windows-x64.exe"
+          $msi = Resolve-Path "dist/screen-windows-x64.msi"
+          $head = [IO.File]::ReadAllBytes($exe)[0..1]
+          if ($head[0] -ne 0x4D -or $head[1] -ne 0x5A) { throw "exe is not a PE file" }
+          $msiHead = [IO.File]::ReadAllBytes($msi)[0..7]
+          $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
+          if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
+          $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            Get-Content $log -Tail 60
+            throw "msiexec exited $($proc.ExitCode)"
+          }
+          $installed = Get-ChildItem "C:\Program Files" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installed) { throw "installed RustDesk.exe was not found" }
+          & $installed.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw "installed app did not run" }
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -442,17 +475,38 @@ jobs:
           test -d "${STAGE}/RustDesk.app"
           test -L "${STAGE}/Applications"
           KB=$(du -sk "$STAGE" | awk '{print $1}')
-          MB=$(( KB / 1024 + KB / 1024 / 5 + 64 ))
+          MB=$(( KB / 1024 + 20 ))
           DMG="dist/${MAC_DIST}.dmg"
-          hdiutil create \
-            -volname screen \
-            -srcfolder "$STAGE" \
-            -fs HFS+ \
-            -format UDZO \
-            -imagekey zlib-level=9 \
-            -size "${MB}m" \
-            -ov \
-            "$DMG"
+          RW="${RUNNER_TEMP}/screen-rw.dmg"
+          rm -f "$RW" "$DMG"
+          # -srcfolder on current macOS writes a GPT disk. Archive Utility then
+          # fails near the end of that image. A layout-none volume does not.
+          hdiutil create -size "${MB}m" -fs HFS+ -volname screen -layout NONE -format UDRW -ov "$RW"
+          RW_MNT="${RUNNER_TEMP}/screen-rw-mount"
+          rm -rf "$RW_MNT"
+          mkdir -p "$RW_MNT"
+          hdiutil attach "$RW" -nobrowse -mountpoint "$RW_MNT"
+          ditto "${STAGE}/RustDesk.app" "$RW_MNT/RustDesk.app"
+          ln -s /Applications "$RW_MNT/Applications"
+          hdiutil detach "$RW_MNT"
+          hdiutil convert "$RW" -format ULFO -ov -o "${DMG%.dmg}"
+          if [ ! -f "$DMG" ] && [ -f "${DMG}.dmg" ]; then
+            mv "${DMG}.dmg" "$DMG"
+          fi
+          test -f "$DMG"
+          python3 - "$DMG" << 'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          i = data.rfind(b"koly")
+          if i < 0:
+              sys.exit("dmg has no koly trailer")
+          xml_off = struct.unpack(">Q", data[i+216:i+224])[0]
+          xml_len = struct.unpack(">Q", data[i+224:i+232])[0]
+          xml = data[xml_off:xml_off+xml_len].decode("utf-8", "replace")
+          if "Protective Master Boot Record" in xml or "GPT Header" in xml:
+              sys.exit("dmg is a partitioned disk image")
+          PY
+          unzip -t "dist/${MAC_DIST}.zip" >/dev/null
           hdiutil verify "$DMG"
           MNT="${RUNNER_TEMP}/screen-dmg-mount"
           rm -rf "$MNT"
@@ -462,8 +516,15 @@ jobs:
           }
           trap cleanup EXIT
           hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
-          test -d "$MNT/RustDesk.app/Contents/MacOS"
+          BIN="$MNT/RustDesk.app/Contents/MacOS/RustDesk"
+          test -x "$BIN"
           test -L "$MNT/Applications"
+          file "$BIN"
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            file "$BIN" | grep -q arm64
+          else
+            file "$BIN" | grep -q x86_64
+          fi
           hdiutil detach "$MNT"
           trap - EXIT
 
@@ -477,7 +538,7 @@ jobs:
   publish:
     name: publish release
     needs: [windows, macos]
-    if: always() && !cancelled() && needs.windows.result != 'skipped' && needs.macos.result != 'skipped'
+    if: needs.windows.result == 'success' && needs.macos.result == 'success'
     runs-on: ubuntu-22.04
     steps:
       - name: Download packages
@@ -497,3 +558,94 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           fail_on_unmatched_files: true
           files: dist/*
+
+  verify-published:
+    name: verify download ${{ matrix.os }}
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+          - os: macos-26-intel
+    steps:
+      - name: Download published files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tag="${{ github.ref_name }}"
+          for name in screen-windows-x64.msi screen-windows-x64.exe screen-windows-x64.zip \
+            screen-mac-intel.dmg screen-mac-intel.zip \
+            screen-mac-apple-silicon.dmg screen-mac-apple-silicon.zip; do
+            url="https://github.com/Yorxsm/screen/releases/download/${tag}/${name}"
+            latest="https://github.com/Yorxsm/screen/releases/latest/download/${name}"
+            curl -fL --retry 5 -o "dist/${name}" "$url"
+            ok=0
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fL --retry 3 -o "dist/${name}.latest" "$latest" && cmp -s "dist/${name}" "dist/${name}.latest"; then
+                ok=1
+                break
+              fi
+              sleep 15
+            done
+            test "$ok" = 1
+            rm -f "dist/${name}.latest"
+          done
+
+      - name: Check Windows files
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
+          $msi = Resolve-Path "dist/screen-windows-x64.msi"
+          $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            Get-Content $log -Tail 80
+            throw "public msi exited $($proc.ExitCode)"
+          }
+          $installed = Get-ChildItem "C:\Program Files" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installed) { throw "public install did not produce RustDesk.exe" }
+          $app = Start-Process $installed.FullName -ArgumentList "--version" -PassThru
+          if (-not $app.WaitForExit(20000)) { Stop-Process $app -Force; throw "installed app did not exit" }
+          if ($app.ExitCode -ne 0) { throw "installed app exited $($app.ExitCode)" }
+
+      - name: Check Mac files
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - << 'PY'
+          import struct, sys, zipfile
+          for name in ("screen-mac-intel.zip", "screen-mac-apple-silicon.zip"):
+              bad = zipfile.ZipFile(f"dist/{name}").testzip()
+              if bad:
+                  sys.exit(f"{name} corrupt: {bad}")
+          for name in ("screen-mac-intel.dmg", "screen-mac-apple-silicon.dmg"):
+              data = open(f"dist/{name}", "rb").read()
+              i = data.rfind(b"koly")
+              if i < 0:
+                  sys.exit(f"{name} has no koly trailer")
+              xml_off = struct.unpack(">Q", data[i+216:i+224])[0]
+              xml_len = struct.unpack(">Q", data[i+224:i+232])[0]
+              xml = data[xml_off:xml_off+xml_len].decode("utf-8", "replace")
+              if "Protective Master Boot Record" in xml or "GPT Header" in xml:
+                  sys.exit(f"{name} is a partitioned disk image")
+          PY
+          for dmg in dist/screen-mac-intel.dmg dist/screen-mac-apple-silicon.dmg; do
+            hdiutil verify "$dmg"
+            mnt="${RUNNER_TEMP}/$(basename "$dmg").mnt"
+            mkdir -p "$mnt"
+            hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt"
+            bin="$mnt/RustDesk.app/Contents/MacOS/RustDesk"
+            test -x "$bin"
+            file "$bin"
+            case "$dmg" in
+              *apple-silicon*) file "$bin" | grep -q arm64 ;;
+              *) file "$bin" | grep -q x86_64 ;;
+            esac
+            hdiutil detach "$mnt"
+          done
