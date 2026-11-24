@@ -259,14 +259,26 @@ jobs:
           $msiHead = [IO.File]::ReadAllBytes($msi)[0..7]
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
+          function Read-SharedText($path) {
+            if (-not (Test-Path $path)) { return "" }
+            $fs = New-Object System.IO.FileStream($path, 'Open', 'Read', 'ReadWrite')
+            try {
+              $len = [int][Math]::Min(12000, $fs.Length)
+              if ($len -le 0) { return "" }
+              $fs.Seek(-$len, 'End') | Out-Null
+              $buf = New-Object byte[] $len
+              $n = $fs.Read($buf, 0, $len)
+              $utf8 = [Text.Encoding]::UTF8.GetString($buf, 0, $n)
+              $utf16 = [Text.Encoding]::Unicode.GetString($buf, 0, $n)
+              return $utf8 + "`n" + $utf16
+            } finally { $fs.Close() }
+          }
           function Wait-MsiLog($log, $seconds) {
             $deadline = (Get-Date).AddSeconds($seconds)
             while ((Get-Date) -lt $deadline) {
-              if (Test-Path $log) {
-                $tail = Get-Content $log -Tail 30 -ErrorAction SilentlyContinue
-                $line = $tail | Select-String -Pattern "Installation success or error status:" | Select-Object -Last 1
-                if ($line) { return $line.Line }
-              }
+              $text = Read-SharedText $log
+              $m = [regex]::Matches($text, "Installation success or error status: \d+")
+              if ($m.Count -gt 0) { return $m[$m.Count - 1].Value }
               Start-Sleep -Seconds 2
             }
             return $null
@@ -701,15 +713,26 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
+          function Read-SharedText($path) {
+            if (-not (Test-Path $path)) { return "" }
+            $fs = New-Object System.IO.FileStream($path, 'Open', 'Read', 'ReadWrite')
+            try {
+              $len = [int][Math]::Min(12000, $fs.Length)
+              if ($len -le 0) { return "" }
+              $fs.Seek(-$len, 'End') | Out-Null
+              $buf = New-Object byte[] $len
+              $n = $fs.Read($buf, 0, $len)
+              $utf8 = [Text.Encoding]::UTF8.GetString($buf, 0, $n)
+              $utf16 = [Text.Encoding]::Unicode.GetString($buf, 0, $n)
+              return $utf8 + "`n" + $utf16
+            } finally { $fs.Close() }
+          }
           function Wait-MsiLog($log, $seconds) {
             $deadline = (Get-Date).AddSeconds($seconds)
             while ((Get-Date) -lt $deadline) {
-              if (Test-Path $log) {
-                $line = Get-Content $log -Tail 30 -ErrorAction SilentlyContinue |
-                  Select-String -Pattern "Installation success or error status:" |
-                  Select-Object -Last 1
-                if ($line) { return $line.Line }
-              }
+              $text = Read-SharedText $log
+              $m = [regex]::Matches($text, "Installation success or error status: \d+")
+              if ($m.Count -gt 0) { return $m[$m.Count - 1].Value }
               Start-Sleep -Seconds 2
             }
             return $null
