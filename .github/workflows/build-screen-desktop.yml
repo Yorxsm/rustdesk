@@ -261,22 +261,19 @@ jobs:
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
           Set-Content -Path "$($msi.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          $ui = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/l*v", "$log.ui") -PassThru
-          if ($ui.WaitForExit(20000)) {
-            if ($ui.ExitCode -ne 0 -and $ui.ExitCode -ne 3010) {
-              if (Test-Path "$log.ui") { Get-Content "$log.ui" -Tail 40 }
-              throw "double-click msiexec exited $($ui.ExitCode)"
-            }
-          } else {
-            Stop-Process -Id $ui.Id -Force -ErrorAction SilentlyContinue
-            Get-Process msiexec -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          # A full wizard waits for Next and holds the installer lock. /qn is the
+          # same msiexec /i path, with the download's Mark of the Web still set.
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -PassThru
+          if (-not $proc.WaitForExit(180000)) {
+            taskkill /F /IM msiexec.exe | Out-Null
+            Get-Content $log -Tail 40
+            throw "msiexec timed out"
           }
-          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
           if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 60
             throw "msiexec exited $($proc.ExitCode)"
           }
-          $installed = Get-ChildItem "C:\Program Files" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $installed = Get-ChildItem "C:\Program Files\RustDesk" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
           & $installed.FullName --version
           if ($LASTEXITCODE -ne 0) { throw "installed app did not run" }
@@ -649,22 +646,17 @@ jobs:
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
           Set-Content -Path "$($msi.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          $ui = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/l*v", "$log.ui") -PassThru
-          if ($ui.WaitForExit(20000)) {
-            if ($ui.ExitCode -ne 0 -and $ui.ExitCode -ne 3010) {
-              if (Test-Path "$log.ui") { Get-Content "$log.ui" -Tail 40 }
-              throw "public double-click msiexec exited $($ui.ExitCode)"
-            }
-          } else {
-            Stop-Process -Id $ui.Id -Force -ErrorAction SilentlyContinue
-            Get-Process msiexec -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -PassThru
+          if (-not $proc.WaitForExit(180000)) {
+            taskkill /F /IM msiexec.exe | Out-Null
+            Get-Content $log -Tail 40
+            throw "public msiexec timed out"
           }
-          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
           if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 80
             throw "public msi exited $($proc.ExitCode)"
           }
-          $installed = Get-ChildItem "C:\Program Files" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $installed = Get-ChildItem "C:\Program Files\RustDesk" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
           $app = Start-Process $installed.FullName -ArgumentList "--version" -PassThru
           if (-not $app.WaitForExit(20000)) { Stop-Process $app -Force; throw "installed app did not exit" }
