@@ -113,6 +113,7 @@ jobs:
     name: windows x64
     needs: bridge
     runs-on: windows-2022
+    timeout-minutes: 100
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -259,46 +260,11 @@ jobs:
           $msiHead = [IO.File]::ReadAllBytes($msi)[0..7]
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
-          function Read-SharedText($path) {
-            if (-not (Test-Path $path)) { return "" }
-            $fs = New-Object System.IO.FileStream($path, 'Open', 'Read', 'ReadWrite')
-            try {
-              $len = [int][Math]::Min(12000, $fs.Length)
-              if ($len -le 0) { return "" }
-              $fs.Seek(-$len, 'End') | Out-Null
-              $buf = New-Object byte[] $len
-              $n = $fs.Read($buf, 0, $len)
-              $utf8 = [Text.Encoding]::UTF8.GetString($buf, 0, $n)
-              $utf16 = [Text.Encoding]::Unicode.GetString($buf, 0, $n)
-              return $utf8 + "`n" + $utf16
-            } finally { $fs.Close() }
-          }
-          function Wait-MsiLog($log, $seconds) {
-            $deadline = (Get-Date).AddSeconds($seconds)
-            while ((Get-Date) -lt $deadline) {
-              $text = Read-SharedText $log
-              $m = [regex]::Matches($text, "Installation success or error status: \d+")
-              if ($m.Count -gt 0) { return $m[$m.Count - 1].Value }
-              Start-Sleep -Seconds 2
-            }
-            return $null
-          }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
-          $clean = Join-Path $env:RUNNER_TEMP "screen-clean.msi"
-          Copy-Item $msi.Path $clean
-          # Do not hold an msiexec Process object: HasExited and WaitForExit
-          # never return while Windows Installer is open.
-          cmd /c "start `"msi`" /MIN msiexec /i `"$clean`" /qn /l*v `"$log`""
-          $status = Wait-MsiLog $log 180
-          taskkill /F /IM msiexec.exe 2>$null | Out-Null
-          if (-not $status) {
-            if (Test-Path $log) { Get-Content $log -Tail 40 }
-            throw "msiexec timed out"
-          }
-          Write-Host $status
-          if ($status -notmatch "status: 0" -and $status -notmatch "status: 3010") {
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 60
-            throw "msiexec failed: $status"
+            throw "msiexec exited $($proc.ExitCode)"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
@@ -713,44 +679,11 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
-          function Read-SharedText($path) {
-            if (-not (Test-Path $path)) { return "" }
-            $fs = New-Object System.IO.FileStream($path, 'Open', 'Read', 'ReadWrite')
-            try {
-              $len = [int][Math]::Min(12000, $fs.Length)
-              if ($len -le 0) { return "" }
-              $fs.Seek(-$len, 'End') | Out-Null
-              $buf = New-Object byte[] $len
-              $n = $fs.Read($buf, 0, $len)
-              $utf8 = [Text.Encoding]::UTF8.GetString($buf, 0, $n)
-              $utf16 = [Text.Encoding]::Unicode.GetString($buf, 0, $n)
-              return $utf8 + "`n" + $utf16
-            } finally { $fs.Close() }
-          }
-          function Wait-MsiLog($log, $seconds) {
-            $deadline = (Get-Date).AddSeconds($seconds)
-            while ((Get-Date) -lt $deadline) {
-              $text = Read-SharedText $log
-              $m = [regex]::Matches($text, "Installation success or error status: \d+")
-              if ($m.Count -gt 0) { return $m[$m.Count - 1].Value }
-              Start-Sleep -Seconds 2
-            }
-            return $null
-          }
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
-          $clean = Join-Path $env:RUNNER_TEMP "screen-public-clean.msi"
-          Copy-Item $msi.Path $clean
-          cmd /c "start `"msi`" /MIN msiexec /i `"$clean`" /qn /l*v `"$log`""
-          $status = Wait-MsiLog $log 180
-          taskkill /F /IM msiexec.exe 2>$null | Out-Null
-          if (-not $status) {
-            if (Test-Path $log) { Get-Content $log -Tail 40 }
-            throw "public msiexec timed out"
-          }
-          Write-Host $status
-          if ($status -notmatch "status: 0" -and $status -notmatch "status: 3010") {
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -Wait -PassThru
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
             Get-Content $log -Tail 80
-            throw "public msi failed: $status"
+            throw "public msi exited $($proc.ExitCode)"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
