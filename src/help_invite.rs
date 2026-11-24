@@ -231,6 +231,12 @@ pub fn spawn_send(host_id: String, token: String) -> bool {
     if !valid_peer_id(&host_id) || !valid_token(&token) {
         return false;
     }
+    // The desktop check looks for this file to see that a cold start reached
+    // the invite send, without reading a log the app still has open.
+    let _ = std::fs::write(
+        std::env::temp_dir().join("screen-cold-start.txt"),
+        format!("{host_id}\n{token}\n"),
+    );
     std::thread::spawn(move || {
         if let Err(err) = send_invite_blocking(host_id, token) {
             log::warn!("Help invite was not delivered: {err}");

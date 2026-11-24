@@ -275,14 +275,14 @@ jobs:
           $gui | Stop-Process -Force
           Get-Process rustdesk,RustDesk -ErrorAction SilentlyContinue | Stop-Process -Force
           $coldUrl = "screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
+          Remove-Item "$env:TEMP\screen-cold-start.txt","$env:RUNNER_TEMP\screen-cold-start.txt" -ErrorAction SilentlyContinue
           cmd /c "start `"app`" /MIN `"$($installed.FullName)`" `"$coldUrl`""
           $coldOk = $false
-          $logDirs = @("$env:APPDATA\RustDesk","$env:LOCALAPPDATA\RustDesk","$env:APPDATA\screen","$env:LOCALAPPDATA\screen")
-          for ($i = 0; $i -lt 45; $i++) {
-            $hit = Get-ChildItem $logDirs -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
-              Select-String -Pattern "Help invite","screen-invite:" -List -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($hit) { Write-Host "cold start log $($hit.Path)"; $coldOk = $true; break }
+          for ($i = 0; $i -lt 60; $i++) {
+            foreach ($marker in @("$env:TEMP\screen-cold-start.txt","$env:RUNNER_TEMP\screen-cold-start.txt")) {
+              if (Test-Path $marker) { Write-Host "cold start marker $marker"; Get-Content $marker; $coldOk = $true; break }
+            }
+            if ($coldOk) { break }
             Start-Sleep -Seconds 1
           }
           if (-not $coldOk) { throw "cold start did not enter the invite flow" }
@@ -563,12 +563,15 @@ jobs:
           if { [ "$HOST_ARCH" = "arm64" ] && echo "$BIN_DESC" | grep -q arm64; } || { [ "$HOST_ARCH" != "arm64" ] && echo "$BIN_DESC" | grep -q x86_64; }; then
             URL="screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
             pkill -x RustDesk || true
+            rm -f "${TMPDIR:-/tmp}/screen-cold-start.txt" /tmp/screen-cold-start.txt
             COLD="${RUNNER_TEMP}/cold-start.log"
             "$UNZ/RustDesk.app/Contents/MacOS/RustDesk" "$URL" >"$COLD" 2>&1 &
             CPID=$!
             ok=0
             for _ in $(seq 1 45); do
-              if grep -R -l -e "Help invite" -e "screen-invite:" "$COLD" "$HOME/Library/Logs" "$HOME/Library/Application Support" >/dev/null 2>&1; then
+              if [ -f "${TMPDIR:-/tmp}/screen-cold-start.txt" ] || [ -f /tmp/screen-cold-start.txt ]; then
+                echo "cold start marker"
+                cat "${TMPDIR:-/tmp}/screen-cold-start.txt" /tmp/screen-cold-start.txt 2>/dev/null || true
                 ok=1
                 break
               fi
@@ -693,14 +696,14 @@ jobs:
           if (-not $gui) { throw "public app GUI was not running" }
           $gui | Stop-Process -Force
           $coldUrl = "screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
+          Remove-Item "$env:TEMP\screen-cold-start.txt","$env:RUNNER_TEMP\screen-cold-start.txt" -ErrorAction SilentlyContinue
           cmd /c "start `"app`" /MIN `"$($installed.FullName)`" `"$coldUrl`""
           $coldOk = $false
-          $logDirs = @("$env:APPDATA\RustDesk","$env:LOCALAPPDATA\RustDesk","$env:APPDATA\screen","$env:LOCALAPPDATA\screen")
-          for ($i = 0; $i -lt 45; $i++) {
-            $hit = Get-ChildItem $logDirs -Recurse -Include *.log,*.txt -ErrorAction SilentlyContinue |
-              Select-String -Pattern "Help invite","screen-invite:" -List -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($hit) { Write-Host "public cold start log $($hit.Path)"; $coldOk = $true; break }
+          for ($i = 0; $i -lt 60; $i++) {
+            foreach ($marker in @("$env:TEMP\screen-cold-start.txt","$env:RUNNER_TEMP\screen-cold-start.txt")) {
+              if (Test-Path $marker) { Write-Host "public cold start marker $marker"; Get-Content $marker; $coldOk = $true; break }
+            }
+            if ($coldOk) { break }
             Start-Sleep -Seconds 1
           }
           if (-not $coldOk) { throw "public cold start did not enter the invite flow" }
@@ -754,12 +757,15 @@ jobs:
                 file "$bin" | grep -q x86_64
                 URL="screen://help/123456789?invite=11111111-1111-1111-1111-111111111111"
                 pkill -x RustDesk || true
+                rm -f "${TMPDIR:-/tmp}/screen-cold-start.txt" /tmp/screen-cold-start.txt
                 COLD="${RUNNER_TEMP}/cold-public.log"
                 "$bin" "$URL" >"$COLD" 2>&1 &
                 CPID=$!
                 ok=0
                 for _ in $(seq 1 45); do
-                  if grep -R -l -e "Help invite" -e "screen-invite:" "$COLD" "$HOME/Library/Logs" "$HOME/Library/Application Support" >/dev/null 2>&1; then
+                  if [ -f "${TMPDIR:-/tmp}/screen-cold-start.txt" ] || [ -f /tmp/screen-cold-start.txt ]; then
+                    echo "public cold start marker"
+                    cat "${TMPDIR:-/tmp}/screen-cold-start.txt" /tmp/screen-cold-start.txt 2>/dev/null || true
                     ok=1
                     break
                   fi
