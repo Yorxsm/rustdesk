@@ -1,0 +1,155 @@
+name: Probe installer open path
+
+# Temporary: what a double-click does with the published desktop-0.1.11 files.
+on:
+  push:
+    branches: [cursor/probe-installers-7fc6]
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    runs-on: macos-26-intel
+    steps:
+      - name: Download and open like Finder
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/dl" "$RUNNER_TEMP/report"
+          cd "$RUNNER_TEMP/dl"
+          for name in screen-mac-intel.dmg screen-mac-apple-silicon.dmg screen-mac-intel.zip screen-mac-apple-silicon.zip; do
+            curl -fL --retry 5 -o "$name" "https://github.com/Yorxsm/screen/releases/download/desktop-0.1.11/$name"
+            echo "==== $name $(wc -c < "$name") bytes ===="
+            echo "-- file --"
+            file "$name"
+            echo "-- first 16 --"
+            xxd -l 16 "$name"
+            echo "-- mdls --"
+            mdls -name kMDItemContentType -name kMDItemContentTypeTree -name kMDItemKind "$name"
+          done
+
+          echo "==== ditto extract zips under quarantine ===="
+          for name in screen-mac-intel.zip screen-mac-apple-silicon.zip; do
+            xattr -w com.apple.quarantine "0083;$(date +%s);Safari;PROBE" "$name"
+            xattr -l "$name"
+            dest="$RUNNER_TEMP/unz-${name%.zip}"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+            ditto -x -k -v "$name" "$dest" > "$RUNNER_TEMP/report/${name}.ditto" 2>&1
+            echo "ditto $name exit $?"
+            app=$(find "$dest" -name RustDesk.app -type d | head -1)
+            echo "app=$app"
+            if [ -n "$app" ]; then
+              bin="$app/Contents/MacOS/RustDesk"
+              dylib="$app/Contents/Frameworks/liblibrustdesk.dylib"
+              link="$app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS"
+              ls -l "$bin" "$dylib" "$link"
+              file "$bin"
+              if [ -L "$link" ]; then
+                echo "flutter symlink target $(readlink "$link") resolves $(cd "$(dirname "$link")" && stat -f %N "$(readlink "$link")" 2>&1 || echo MISSING)"
+                test -e "$link" && echo "flutter symlink exists" || echo "flutter symlink BROKEN"
+              else
+                echo "flutter path is not a symlink"
+              fi
+              du -sk "$app"
+            fi
+          done
+
+          echo "==== open dmgs under quarantine ===="
+          for name in screen-mac-intel.dmg screen-mac-apple-silicon.dmg; do
+            xattr -w com.apple.quarantine "0083;$(date +%s);Safari;PROBE" "$name"
+            echo "-- hdiutil attach without -nobrowse $name --"
+            mnt="$RUNNER_TEMP/mnt-$name"
+            rm -rf "$mnt"
+            mkdir -p "$mnt"
+            hdiutil attach "$name" -readonly -mountpoint "$mnt"
+            echo "attach exit $?"
+            ls -l "$mnt" | head
+            hdiutil detach "$mnt" || hdiutil detach -force "$mnt"
+            echo "-- open $name --"
+            open "$name"
+            sleep 4
+            echo "-- volumes --"
+            ls -d /Volumes/* 2>/dev/null
+            hdiutil info | head -80
+            # close anything we mounted
+            hdiutil info | awk '/image-path/ {print $3}' | while read -r img; do
+              case "$img" in
+                *screen-mac*) hdiutil detach "$img" || true ;;
+              esac
+            done
+            osascript -e 'tell application "Finder" to eject (every disk whose name starts with "screen")' || true
+            echo "-- Archive Utility on $name --"
+            open -a "Archive Utility" "$name"
+            sleep 6
+            ls -d /Volumes/* 2>/dev/null
+            log show --last 2m --style compact --predicate 'process == "Archive Utility" OR process == "BOMArchiveHelper" OR eventMessage CONTAINS "extract" OR eventMessage CONTAINS "Extraction"' 2>/dev/null | tail -40
+          done
+          echo PROBE_MAC_DONE
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Download and open like a double-click
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\dl" | Out-Null
+          Set-Location "$env:RUNNER_TEMP\dl"
+          foreach ($name in @("screen-windows-x64.msi","screen-windows-x64.exe","screen-windows-x64.zip")) {
+            curl.exe -fL --retry 5 -o $name "https://github.com/Yorxsm/screen/releases/download/desktop-0.1.11/$name"
+            Write-Host "==== $name $((Get-Item $name).Length) ===="
+          }
+          function Set-Motw($path) {
+            $zone = "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen/releases/download/desktop-0.1.11/`r`n"
+            Set-Content -Path "${path}:Zone.Identifier" -Value $zone -Encoding Ascii
+            Write-Host "MOTW $path"
+            Get-Content -Path "${path}:Zone.Identifier"
+          }
+          $msi = (Resolve-Path "screen-windows-x64.msi").Path
+          $exe = (Resolve-Path "screen-windows-x64.exe").Path
+          Set-Motw $msi
+          Set-Motw $exe
+          $log = Join-Path $env:RUNNER_TEMP "msi-ui.log"
+          Write-Host "==== full UI msiexec, 20s, with MOTW ===="
+          $proc = Start-Process msiexec -ArgumentList @("/i", $msi, "/l*v", $log) -PassThru
+          if ($proc.WaitForExit(20000)) {
+            Write-Host "msiexec UI exited $($proc.ExitCode)"
+          } else {
+            Write-Host "msiexec UI still running (package opened)"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Get-Process msiexec -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          if (Test-Path $log) { Get-Content $log -Tail 40 }
+          Write-Host "==== silent install then GUI launch ===="
+          $log2 = Join-Path $env:RUNNER_TEMP "msi-qn.log"
+          $proc2 = Start-Process msiexec -ArgumentList @("/i", $msi, "/qn", "/l*v", $log2) -Wait -PassThru
+          Write-Host "msiexec qn $($proc2.ExitCode)"
+          $installed = Get-ChildItem "C:\Program Files" -Recurse -Filter RustDesk.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installed) { Write-Host "NO installed exe"; exit 0 }
+          Write-Host "installed $($installed.FullName)"
+          Get-ChildItem $installed.DirectoryName -Filter *.dll | Select-Object Name, Length
+          $dumpbin = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "Hostx64\\x64" } | Select-Object -First 1
+          if ($dumpbin) {
+            & $dumpbin.FullName /dependents $installed.FullName
+            $flutter = Join-Path $installed.DirectoryName "flutter_windows.dll"
+            if (Test-Path $flutter) { & $dumpbin.FullName /dependents $flutter }
+            & $dumpbin.FullName /dependents $exe
+          } else { Write-Host "no dumpbin" }
+          Write-Host "==== launch installed GUI ===="
+          $app = Start-Process $installed.FullName -PassThru
+          Start-Sleep -Seconds 8
+          if ($app.HasExited) { Write-Host "GUI exited $($app.ExitCode)" } else { Write-Host "GUI still running pid $($app.Id)"; Stop-Process -Id $app.Id -Force }
+          Write-Host "==== launch portable exe with MOTW ===="
+          $port = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($port.HasExited) { Write-Host "portable exited $($port.ExitCode)" } else { Write-Host "portable still running"; Stop-Process -Id $port.Id -Force }
+          Get-Process | Where-Object { $_.ProcessName -match "rustdesk|screen" } | Format-Table Id, ProcessName, Path -AutoSize
+          Get-Process | Where-Object { $_.ProcessName -match "rustdesk|screen" } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Write-Host "==== recent application errors ===="
+          Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match "rustdesk|RustDesk|DLL|not found|side-by-side" } |
+            Select-Object -First 15 TimeCreated, Id, ProviderName, Message |
+            Format-List
+          Write-Host PROBE_WIN_DONE
