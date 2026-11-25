@@ -264,15 +264,17 @@ jobs:
           $marker = Join-Path $env:RUNNER_TEMP "msi-done.txt"
           $cmdFile = Join-Path $env:RUNNER_TEMP "msi-install.cmd"
           Remove-Item $marker, $log -ErrorAction SilentlyContinue
-          # Do not wait on the msiexec Process object: -Wait, HasExited, and
-          # reading the live log have all stalled this step. A marker file is
-          # written only after msiexec exits. CC_CONNECTION_TYPE=outgoing skips
-          # the service action, which blocks inside StartServiceW.
+          # Do not wait on the msiexec Process object or read the live log:
+          # both have stalled this step. The marker is written only after
+          # msiexec exits. Put the redirect first so a one-digit exit code is
+          # not parsed as a batch file handle.
           @(
             "@echo off",
-            "msiexec /i `"$($msi.Path)`" /qn CC_CONNECTION_TYPE=outgoing LAUNCH_TRAY_APP=N /l*v `"$log`"",
-            "echo %ERRORLEVEL%> `"$marker`""
+            "msiexec /i `"$($msi.Path)`" /qn LAUNCH_TRAY_APP=N /l*v `"$log`"",
+            "set RC=%ERRORLEVEL%",
+            "> `"$marker`" echo %RC%"
           ) | Set-Content -Path $cmdFile -Encoding Ascii
+          Get-Content $cmdFile
           cmd /c "start `"msi`" /MIN cmd /c `"$cmdFile`""
           $ready = $false
           for ($i = 0; $i -lt 240; $i++) {
@@ -285,11 +287,12 @@ jobs:
             if (Test-Path $log) { Get-Content $log -Tail 60 }
             throw "msiexec did not finish"
           }
+          $codeText = (Get-Content $marker -ErrorAction SilentlyContinue | Select-Object -First 1)
+          Write-Host "msiexec exit [$codeText]"
           $code = 0
-          [void][int]::TryParse((Get-Content $marker -Raw).Trim(), [ref]$code)
-          Write-Host "msiexec exit $code"
+          if ($codeText -match "(\d+)") { $code = [int]$Matches[1] }
           if ($code -ne 0 -and $code -ne 3010) {
-            Get-Content $log -Tail 40
+            if (Test-Path $log) { Get-Content $log -Tail 40 }
             throw "msiexec exited $code"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -730,8 +733,9 @@ jobs:
           Remove-Item $marker, $log -ErrorAction SilentlyContinue
           @(
             "@echo off",
-            "msiexec /i `"$($msi.Path)`" /qn CC_CONNECTION_TYPE=outgoing LAUNCH_TRAY_APP=N /l*v `"$log`"",
-            "echo %ERRORLEVEL%> `"$marker`""
+            "msiexec /i `"$($msi.Path)`" /qn LAUNCH_TRAY_APP=N /l*v `"$log`"",
+            "set RC=%ERRORLEVEL%",
+            "> `"$marker`" echo %RC%"
           ) | Set-Content -Path $cmdFile -Encoding Ascii
           cmd /c "start `"msi`" /MIN cmd /c `"$cmdFile`""
           $ready = $false
@@ -745,11 +749,12 @@ jobs:
             if (Test-Path $log) { Get-Content $log -Tail 60 }
             throw "public msiexec did not finish"
           }
+          $codeText = (Get-Content $marker -ErrorAction SilentlyContinue | Select-Object -First 1)
+          Write-Host "public msiexec exit [$codeText]"
           $code = 0
-          [void][int]::TryParse((Get-Content $marker -Raw).Trim(), [ref]$code)
-          Write-Host "public msiexec exit $code"
+          if ($codeText -match "(\d+)") { $code = [int]$Matches[1] }
           if ($code -ne 0 -and $code -ne 3010) {
-            Get-Content $log -Tail 40
+            if (Test-Path $log) { Get-Content $log -Tail 40 }
             throw "public msi exited $code"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
