@@ -261,12 +261,36 @@ jobs:
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
-          # LAUNCH_TRAY_APP launches the GUI before msiexec returns. -Wait then
-          # follows that GUI. Turn the launch off and start the app ourselves.
-          $proc = Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "LAUNCH_TRAY_APP=N", "/l*v", $log) -Wait -PassThru
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+          $marker = Join-Path $env:RUNNER_TEMP "msi-done.txt"
+          $cmdFile = Join-Path $env:RUNNER_TEMP "msi-install.cmd"
+          Remove-Item $marker, $log -ErrorAction SilentlyContinue
+          # Do not wait on the msiexec Process object: -Wait, HasExited, and
+          # reading the live log have all stalled this step. A marker file is
+          # written only after msiexec exits. CC_CONNECTION_TYPE=outgoing skips
+          # the service action, which blocks inside StartServiceW.
+          @(
+            "@echo off",
+            "msiexec /i `"$($msi.Path)`" /qn CC_CONNECTION_TYPE=outgoing LAUNCH_TRAY_APP=N /l*v `"$log`"",
+            "echo %ERRORLEVEL%> `"$marker`""
+          ) | Set-Content -Path $cmdFile -Encoding Ascii
+          cmd /c "start `"msi`" /MIN cmd /c `"$cmdFile`""
+          $ready = $false
+          for ($i = 0; $i -lt 240; $i++) {
+            if (Test-Path $marker) { $ready = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ready) {
+            cmd /c "taskkill /F /IM msiexec.exe" | Out-Null
+            Start-Sleep -Seconds 2
+            if (Test-Path $log) { Get-Content $log -Tail 60 }
+            throw "msiexec did not finish"
+          }
+          $code = 0
+          [void][int]::TryParse((Get-Content $marker -Raw).Trim(), [ref]$code)
+          Write-Host "msiexec exit $code"
+          if ($code -ne 0 -and $code -ne 3010) {
             Get-Content $log -Tail 40
-            throw "msiexec exited $($proc.ExitCode)"
+            throw "msiexec exited $code"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
@@ -290,11 +314,11 @@ jobs:
           if (-not $coldOk) { throw "cold start did not enter the invite flow" }
           Get-Process -Name RustDesk,rustdesk -ErrorAction SilentlyContinue | Stop-Process -Force
           Set-Content -Path "$($exe.Path):Zone.Identifier" -Value "[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://github.com/Yorxsm/screen`r`n" -Encoding Ascii
-          $port = Start-Process $exe.Path -PassThru
+          cmd /c "start `"app`" /MIN `"$($exe.Path)`""
           Start-Sleep -Seconds 8
-          $child = Get-Process | Where-Object { $_.ProcessName -match "rustdesk" }
-          if ($port.HasExited -and -not $child) { throw "portable exe exited $($port.ExitCode) and did not start the app" }
-          Get-Process | Where-Object { $_.ProcessName -match "rustdesk" } | Stop-Process -Force -ErrorAction SilentlyContinue
+          $child = Get-Process -Name RustDesk,rustdesk -ErrorAction SilentlyContinue
+          if (-not $child) { throw "portable exe did not start the app" }
+          $child | Stop-Process -Force
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -634,10 +658,26 @@ jobs:
       - name: Show packages
         run: ls -l dist
 
+      - name: Do not let an older tag replace latest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/tags" --jq '.[].name' > tags.txt
+          newest=$(grep -E '^desktop-[0-9]+\.[0-9]+\.[0-9]+$' tags.txt | sort -V | tail -1)
+          echo "newest tag is ${newest}"
+          if [ "${newest}" = "${RELEASE_TAG}" ]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "${RELEASE_TAG} is older than ${newest}; publishing as a prerelease"
+          fi
+
       - name: Publish Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: false
+          prerelease: ${{ steps.latest.outputs.prerelease == 'true' }}
           tag_name: ${{ env.RELEASE_TAG }}
           fail_on_unmatched_files: true
           files: dist/*
@@ -685,10 +725,32 @@ jobs:
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
-          $proc = Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "LAUNCH_TRAY_APP=N", "/l*v", $log) -Wait -PassThru
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+          $marker = Join-Path $env:RUNNER_TEMP "msi-public-done.txt"
+          $cmdFile = Join-Path $env:RUNNER_TEMP "msi-public.cmd"
+          Remove-Item $marker, $log -ErrorAction SilentlyContinue
+          @(
+            "@echo off",
+            "msiexec /i `"$($msi.Path)`" /qn CC_CONNECTION_TYPE=outgoing LAUNCH_TRAY_APP=N /l*v `"$log`"",
+            "echo %ERRORLEVEL%> `"$marker`""
+          ) | Set-Content -Path $cmdFile -Encoding Ascii
+          cmd /c "start `"msi`" /MIN cmd /c `"$cmdFile`""
+          $ready = $false
+          for ($i = 0; $i -lt 240; $i++) {
+            if (Test-Path $marker) { $ready = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ready) {
+            cmd /c "taskkill /F /IM msiexec.exe" | Out-Null
+            Start-Sleep -Seconds 2
+            if (Test-Path $log) { Get-Content $log -Tail 60 }
+            throw "public msiexec did not finish"
+          }
+          $code = 0
+          [void][int]::TryParse((Get-Content $marker -Raw).Trim(), [ref]$code)
+          Write-Host "public msiexec exit $code"
+          if ($code -ne 0 -and $code -ne 3010) {
             Get-Content $log -Tail 40
-            throw "public msi exited $($proc.ExitCode)"
+            throw "public msi exited $code"
           }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
