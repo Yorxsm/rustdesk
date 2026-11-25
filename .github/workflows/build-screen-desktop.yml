@@ -261,25 +261,31 @@ jobs:
           $ole = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
           if ((Compare-Object $msiHead $ole) -ne $null) { throw "msi is not an OLE package" }
           $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
-          # The Windows Installer service is also named msiexec and never exits.
-          # Track only the client we started. Do not call HasExited or -Wait:
-          # -Wait also follows the tray app.
-          $proc = Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -WindowStyle Hidden -PassThru
-          $msiPid = $proc.Id
+          # Never touch the msiexec Process object. HasExited, -Wait, and
+          # Get-Process -Id all block while the installer is open.
+          Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -WindowStyle Hidden
+          $status = $null
           $deadline = (Get-Date).AddSeconds(600)
-          while ((Get-Process -Id $msiPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
-          if (Get-Process -Id $msiPid -ErrorAction SilentlyContinue) {
-            taskkill /F /PID $msiPid | Out-Null
-            Start-Sleep -Seconds 1
-            if (Test-Path $log) { Get-Content $log -Tail 40 }
-            throw "msiexec timed out"
+          while ((Get-Date) -lt $deadline) {
+            try {
+              $fs = New-Object System.IO.FileStream($log, 'Open', 'Read', 'ReadWrite')
+              try {
+                $len = [int][Math]::Min(16000, $fs.Length)
+                if ($len -gt 0) {
+                  $fs.Seek(-$len, 'End') | Out-Null
+                  $buf = New-Object byte[] $len
+                  $n = $fs.Read($buf, 0, $len)
+                  $text = [Text.Encoding]::Unicode.GetString($buf, 0, $n) + [Text.Encoding]::UTF8.GetString($buf, 0, $n)
+                  $m = [regex]::Matches($text, "Installation success or error status: \d+")
+                  if ($m.Count -gt 0) { $status = $m[$m.Count - 1].Value; break }
+                }
+              } finally { $fs.Close() }
+            } catch { }
+            Start-Sleep -Seconds 2
           }
-          $tail = Get-Content $log -Tail 40
-          $tail | Select-Object -Last 8
-          $status = $tail | Select-String -Pattern "Installation success or error status:" | Select-Object -Last 1
-          if (-not $status -or ($status.Line -notmatch "status: 0" -and $status.Line -notmatch "status: 3010")) {
-            throw "msiexec failed: $status"
-          }
+          if (-not $status) { throw "msiexec timed out" }
+          Write-Host $status
+          if ($status -notmatch "status: 0" -and $status -notmatch "status: 3010") { throw "msiexec failed: $status" }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "installed RustDesk.exe was not found" }
           cmd /c "start `"app`" /MIN `"$($installed.FullName)`""
@@ -697,22 +703,29 @@ jobs:
           python -c "import zipfile,sys; z=zipfile.ZipFile(r'dist/screen-windows-x64.zip'); sys.exit(1 if z.testzip() else 0)"
           $msi = Resolve-Path "dist/screen-windows-x64.msi"
           $log = Join-Path $env:RUNNER_TEMP "msi-public.log"
-          $proc = Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -WindowStyle Hidden -PassThru
-          $msiPid = $proc.Id
+          Start-Process msiexec.exe -ArgumentList @("/i", $msi.Path, "/qn", "/l*v", $log) -WindowStyle Hidden
+          $status = $null
           $deadline = (Get-Date).AddSeconds(600)
-          while ((Get-Process -Id $msiPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
-          if (Get-Process -Id $msiPid -ErrorAction SilentlyContinue) {
-            taskkill /F /PID $msiPid | Out-Null
-            Start-Sleep -Seconds 1
-            if (Test-Path $log) { Get-Content $log -Tail 40 }
-            throw "public msiexec timed out"
+          while ((Get-Date) -lt $deadline) {
+            try {
+              $fs = New-Object System.IO.FileStream($log, 'Open', 'Read', 'ReadWrite')
+              try {
+                $len = [int][Math]::Min(16000, $fs.Length)
+                if ($len -gt 0) {
+                  $fs.Seek(-$len, 'End') | Out-Null
+                  $buf = New-Object byte[] $len
+                  $n = $fs.Read($buf, 0, $len)
+                  $text = [Text.Encoding]::Unicode.GetString($buf, 0, $n) + [Text.Encoding]::UTF8.GetString($buf, 0, $n)
+                  $m = [regex]::Matches($text, "Installation success or error status: \d+")
+                  if ($m.Count -gt 0) { $status = $m[$m.Count - 1].Value; break }
+                }
+              } finally { $fs.Close() }
+            } catch { }
+            Start-Sleep -Seconds 2
           }
-          $tail = Get-Content $log -Tail 40
-          $status = $tail | Select-String -Pattern "Installation success or error status:" | Select-Object -Last 1
-          if (-not $status -or ($status.Line -notmatch "status: 0" -and $status.Line -notmatch "status: 3010")) {
-            $tail | Select-Object -Last 20
-            throw "public msi failed: $status"
-          }
+          if (-not $status) { throw "public msiexec timed out" }
+          Write-Host $status
+          if ($status -notmatch "status: 0" -and $status -notmatch "status: 3010") { throw "public msi failed: $status" }
           $installed = Get-ChildItem "C:\Program Files\RustDesk" -Filter RustDesk.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $installed) { throw "public install did not produce RustDesk.exe" }
           cmd /c "start `"app`" /MIN `"$($installed.FullName)`""
